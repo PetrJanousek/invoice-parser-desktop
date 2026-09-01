@@ -4,8 +4,10 @@ All secrets and the LLM provider switch live here. Nothing else in the app
 reads os.environ directly — import ``settings`` instead.
 """
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal, Optional
 
+from platformdirs import user_data_dir
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -36,28 +38,14 @@ class Settings(BaseSettings):
     google_api_key: Optional[str] = None
     ollama_url: str = "http://localhost:11434"
 
-    # --- Supabase (Postgres + Auth) ----------------------------------------
-    # Placeholders by default so the app boots without a real project; fill in
-    # real values (or set them in the Render dashboard) before going live.
-    supabase_url: str = "https://YOUR-PROJECT.supabase.co"
-    supabase_anon_key: str = "REPLACE_ME_ANON_KEY"
-    supabase_service_key: str = "REPLACE_ME_SERVICE_ROLE_KEY"
-
-    # --- App secrets --------------------------------------------------------
-    # Fernet key used to encrypt stored email passwords at rest.
-    # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-    app_encryption_key: str = "REPLACE_ME_FERNET_KEY"
+    # Local app data (SQLite, encryption key, uploads). Override with DATA_DIR.
+    data_dir: Path = Field(default_factory=lambda: Path(user_data_dir("InvoiceParser")))
 
     # Max unread emails processed per "Read emails now" click.
     email_batch_cap: int = 20
 
-    @property
-    def supabase_configured(self) -> bool:
-        """True once real Supabase credentials have been supplied."""
-        return (
-            "YOUR-PROJECT" not in self.supabase_url
-            and "REPLACE_ME" not in self.supabase_service_key
-        )
+    def model_post_init(self, __context: object) -> None:
+        self.data_dir.mkdir(parents=True, exist_ok=True)
 
 
 @lru_cache
