@@ -6,6 +6,10 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 
+# PyInstaller build output (desktop_app.spec stays tracked)
+build/
+dist/
+
 # Secrets / local env (NEVER commit real keys)
 .env
 .env.local
