@@ -2,7 +2,7 @@
 
 Routes:
   GET    /                       -> single-page UI
-  GET    /api/config             -> public config (Supabase URL/anon key, model)
+  GET    /api/config             -> public config (model, email providers)
   GET    /api/health             -> liveness
   GET    /api/rows               -> current user's invoices
   POST   /api/upload             -> multipart PDF -> extract -> store
@@ -22,7 +22,7 @@ import json
 import zipfile
 from pathlib import Path
 
-from fastapi import Body, Depends, FastAPI, File, HTTPException, UploadFile
+from fastapi import Body, FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import (
     FileResponse,
     JSONResponse,
@@ -32,7 +32,6 @@ from fastapi.responses import (
 from starlette.concurrency import run_in_threadpool
 
 from . import bank_parsers, db, extract
-from .auth import User, current_user
 from .config import settings
 from .crypto import encrypt
 from .email_ingest import PROVIDERS, EmailConfigError, read_unread
@@ -58,6 +57,10 @@ EDITABLE_BANK = set(BANK_STATEMENT_FIELDS) | {"transactions", "pohoda_ico"}
 # regardless of the per-request value the user asks for (safety valve).
 EMAIL_BATCH_HARD_MAX = 200
 
+# Single local user: db.py functions still take a leading user_id argument
+# (ignored internally) so this placeholder is passed everywhere one is needed.
+LOCAL_USER = "local"
+
 
 @app.get("/")
 def index():
@@ -70,17 +73,13 @@ def health():
         "status": "ok",
         "model": active_model_label(),
         "vision_model": active_vision_model_label(),
-        "supabase_configured": settings.supabase_configured,
     }
 
 
 @app.get("/api/config")
 def public_config():
-    """Non-secret config the frontend needs to boot (anon key is public)."""
+    """Non-secret config the frontend needs to boot."""
     return {
-        "supabase_url": settings.supabase_url,
-        "supabase_anon_key": settings.supabase_anon_key,
-        "supabase_configured": settings.supabase_configured,
         "model": active_model_label(),
         "vision_model": active_vision_model_label(),
         "email_providers": list(PROVIDERS.keys()),
@@ -90,8 +89,8 @@ def public_config():
 
 
 @app.get("/api/rows")
-def get_rows(user: User = Depends(current_user)):
-    return db.list_invoices(user.id)
+def get_rows():
+    return db.list_invoices(LOCAL_USER)
 
 
 def _now_iso() -> str:
@@ -161,9 +160,7 @@ def _cleanup_source_file(user_id: str, row: dict) -> None:
 
 
 @app.post("/api/upload")
-async def upload(
-    file: UploadFile = File(...), user: User = Depends(current_user)
-):
+async def upload(file: UploadFile = File(...)):
     """Extract a PDF and store it, streaming progress as Server-Sent Events.
 
     The response is a text/event-stream of `data: {json}` events:
@@ -213,16 +210,16 @@ async def upload(
         try:
             plan = await run_in_threadpool(extract.plan_document, pdf_bytes)
         except PdfTextError as exc:
-            row = db.insert_invoice(user.id, {**_invoice_base(), "error": str(exc)})
-            _store_source_pdf(user.id, [row], pdf_bytes, db.update_invoice)
+            row = db.insert_invoice(LOCAL_USER, {**_invoice_base(), "error": str(exc)})
+            _store_source_pdf(LOCAL_USER, [row], pdf_bytes, db.update_invoice)
             yield sse({"type": "invoices", "rows": [row]})
             yield sse({"type": "done", "kind": "invoice"})
             return
         except Exception as exc:
             row = db.insert_invoice(
-                user.id, {**_invoice_base(), "error": f"Extraction failed: {exc}"}
+                LOCAL_USER, {**_invoice_base(), "error": f"Extraction failed: {exc}"}
             )
-            _store_source_pdf(user.id, [row], pdf_bytes, db.update_invoice)
+            _store_source_pdf(LOCAL_USER, [row], pdf_bytes, db.update_invoice)
             yield sse({"type": "invoices", "rows": [row]})
             yield sse({"type": "done", "kind": "invoice"})
             return
@@ -240,7 +237,7 @@ async def upload(
             )
             if parsed:
                 row = db.insert_bank_statement(
-                    user.id,
+                    LOCAL_USER,
                     {
                         **_statement_base(),
                         **parsed,
@@ -248,7 +245,7 @@ async def upload(
                     },
                 )
                 _store_source_pdf(
-                    user.id, [row], pdf_bytes, db.update_bank_statement
+                    LOCAL_USER, [row], pdf_bytes, db.update_bank_statement
                 )
                 yield sse({"type": "statement_started", "row": row})
                 yield sse({"type": "done", "kind": "bank_statement", "id": row["id"]})
@@ -271,8 +268,8 @@ async def upload(
                 rows = [{**_invoice_base(), **inv} for inv in invoices]
             except Exception as exc:
                 rows = [{**_invoice_base(), "error": f"Extraction failed: {exc}"}]
-            inserted = [db.insert_invoice(user.id, r) for r in rows]
-            _store_source_pdf(user.id, inserted, pdf_bytes, db.update_invoice)
+            inserted = [db.insert_invoice(LOCAL_USER, r) for r in rows]
+            _store_source_pdf(LOCAL_USER, inserted, pdf_bytes, db.update_invoice)
             yield sse({"type": "invoices", "rows": inserted})
             yield sse({"type": "done", "kind": "invoice"})
             return
@@ -289,9 +286,9 @@ async def upload(
             except Exception as exc:
                 statement = {"error": f"Extraction failed: {exc}"}
             row = db.insert_bank_statement(
-                user.id, {**_statement_base(), **statement}
+                LOCAL_USER, {**_statement_base(), **statement}
             )
-            _store_source_pdf(user.id, [row], pdf_bytes, db.update_bank_statement)
+            _store_source_pdf(LOCAL_USER, [row], pdf_bytes, db.update_bank_statement)
             yield sse({"type": "statement_started", "row": row})
             yield sse({"type": "done", "kind": "bank_statement", "id": row["id"]})
             return
@@ -319,16 +316,16 @@ async def upload(
 
             if row is None:
                 row = db.insert_bank_statement(
-                    user.id,
+                    LOCAL_USER,
                     {**_statement_base(), **header, "transactions": all_txns},
                 )
                 _store_source_pdf(
-                    user.id, [row], pdf_bytes, db.update_bank_statement
+                    LOCAL_USER, [row], pdf_bytes, db.update_bank_statement
                 )
                 yield sse({"type": "statement_started", "row": row})
             else:
                 row = db.update_bank_statement(
-                    user.id,
+                    LOCAL_USER,
                     row["id"],
                     {**header, "transactions": all_txns, "updated_at": _now_iso()},
                 )
@@ -343,11 +340,11 @@ async def upload(
         # the file still shows up and can be retried/corrected.
         if row is None:
             row = db.insert_bank_statement(
-                user.id,
+                LOCAL_USER,
                 {**_statement_base(), "error": "No transactions could be extracted."},
             )
             _store_source_pdf(
-                user.id, [row], pdf_bytes, db.update_bank_statement
+                LOCAL_USER, [row], pdf_bytes, db.update_bank_statement
             )
             yield sse({"type": "statement_started", "row": row})
 
@@ -361,25 +358,19 @@ async def upload(
 
 
 @app.patch("/api/rows/{invoice_id}")
-async def edit_row(
-    invoice_id: str, payload: dict, user: User = Depends(current_user)
-):
+async def edit_row(invoice_id: str, payload: dict):
     fields = {k: v for k, v in payload.items() if k in EDITABLE}
     if not fields:
         raise HTTPException(status_code=400, detail="No editable fields given.")
     fields["updated_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
-    updated = db.update_invoice(user.id, invoice_id, fields)
+    updated = db.update_invoice(LOCAL_USER, invoice_id, fields)
     if updated is None:
         raise HTTPException(status_code=404, detail="Invoice not found.")
     return updated
 
 
 @app.post("/api/rows/{invoice_id}/report")
-def report_row(
-    invoice_id: str,
-    payload: dict = Body(default={}),
-    user: User = Depends(current_user),
-):
+def report_row(invoice_id: str, payload: dict = Body(default={})):
     """Flag an invoice as needing a manual/agent review of its extraction.
 
     Reporting also snapshots the row into ``reported_documents``. Send
@@ -387,78 +378,72 @@ def report_row(
     toggle so a mis-click is undoable — which leaves the snapshot in place.
     """
     reported = bool(payload.get("reported", True))
-    updated = db.update_invoice(user.id, invoice_id, _report_fields(reported))
+    updated = db.update_invoice(LOCAL_USER, invoice_id, _report_fields(reported))
     if updated is None:
         raise HTTPException(status_code=404, detail="Invoice not found.")
     if reported:
-        _snapshot_reported("invoice", user.id, updated)
+        _snapshot_reported("invoice", LOCAL_USER, updated)
     return updated
 
 
 @app.delete("/api/rows/{invoice_id}")
-def remove_row(invoice_id: str, user: User = Depends(current_user)):
-    deleted = db.delete_invoice(user.id, invoice_id)
+def remove_row(invoice_id: str):
+    deleted = db.delete_invoice(LOCAL_USER, invoice_id)
     if deleted is None:
         raise HTTPException(status_code=404, detail="Invoice not found.")
-    _cleanup_source_file(user.id, deleted)
+    _cleanup_source_file(LOCAL_USER, deleted)
     return {"deleted": invoice_id}
 
 
 # --- Bank statements -------------------------------------------------------
 
 @app.get("/api/bank-statements")
-def get_bank_statements(user: User = Depends(current_user)):
-    return db.list_bank_statements(user.id)
+def get_bank_statements():
+    return db.list_bank_statements(LOCAL_USER)
 
 
 @app.patch("/api/bank-statements/{statement_id}")
-def edit_bank_statement(
-    statement_id: str, payload: dict, user: User = Depends(current_user)
-):
+def edit_bank_statement(statement_id: str, payload: dict):
     fields = {k: v for k, v in payload.items() if k in EDITABLE_BANK}
     if not fields:
         raise HTTPException(status_code=400, detail="No editable fields given.")
     if "transactions" in fields and not isinstance(fields["transactions"], list):
         raise HTTPException(status_code=400, detail="transactions must be a list.")
     fields["updated_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
-    updated = db.update_bank_statement(user.id, statement_id, fields)
+    updated = db.update_bank_statement(LOCAL_USER, statement_id, fields)
     if updated is None:
         raise HTTPException(status_code=404, detail="Bank statement not found.")
     return updated
 
 
 @app.post("/api/bank-statements/{statement_id}/report")
-def report_bank_statement(
-    statement_id: str,
-    payload: dict = Body(default={}),
-    user: User = Depends(current_user),
-):
+def report_bank_statement(statement_id: str, payload: dict = Body(default={})):
     """Flag a bank statement for review; ``{"reported": false}`` clears it."""
     reported = bool(payload.get("reported", True))
     updated = db.update_bank_statement(
-        user.id, statement_id, _report_fields(reported)
+        LOCAL_USER, statement_id, _report_fields(reported)
     )
     if updated is None:
         raise HTTPException(status_code=404, detail="Bank statement not found.")
     if reported:
-        _snapshot_reported("bank_statement", user.id, updated)
+        _snapshot_reported("bank_statement", LOCAL_USER, updated)
     return updated
 
 
 @app.delete("/api/bank-statements/{statement_id}")
-def remove_bank_statement(statement_id: str, user: User = Depends(current_user)):
-    deleted = db.delete_bank_statement(user.id, statement_id)
+def remove_bank_statement(statement_id: str):
+    deleted = db.delete_bank_statement(LOCAL_USER, statement_id)
     if deleted is None:
         raise HTTPException(status_code=404, detail="Bank statement not found.")
-    _cleanup_source_file(user.id, deleted)
+    _cleanup_source_file(LOCAL_USER, deleted)
     return {"deleted": statement_id}
 
 
 # --- Email settings + ingestion -------------------------------------------
 
 @app.get("/api/email-settings")
-def read_email_settings(user: User = Depends(current_user)):
-    row = db.get_email_settings(user.id) or {}
+def read_email_settings():
+    row = db.get_email_settings(LOCAL_USER) or {}
     # Never leak the encrypted password; just say whether one is set.
     return {
         "provider": row.get("provider"),
@@ -470,7 +455,7 @@ def read_email_settings(user: User = Depends(current_user)):
 
 
 @app.put("/api/email-settings")
-def save_email_settings(payload: dict, user: User = Depends(current_user)):
+def save_email_settings(payload: dict):
     provider = (payload.get("provider") or "").lower()
     if provider and provider not in PROVIDERS:
         raise HTTPException(status_code=400, detail=f"Unknown provider {provider!r}.")
@@ -485,15 +470,13 @@ def save_email_settings(payload: dict, user: User = Depends(current_user)):
     if password:
         fields["imap_password_encrypted"] = encrypt(password)
 
-    db.upsert_email_settings(user.id, fields)
-    return read_email_settings(user)
+    db.upsert_email_settings(LOCAL_USER, fields)
+    return read_email_settings()
 
 
 @app.post("/api/emails/read")
-def read_emails_now(
-    payload: dict = Body(default={}), user: User = Depends(current_user)
-):
-    row = db.get_email_settings(user.id)
+def read_emails_now(payload: dict = Body(default={})):
+    row = db.get_email_settings(LOCAL_USER)
     if not row:
         raise HTTPException(
             status_code=400,
@@ -511,9 +494,9 @@ def read_emails_now(
     except EmailConfigError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    inserted = [db.insert_invoice(user.id, r) for r in result["rows"]]
+    inserted = [db.insert_invoice(LOCAL_USER, r) for r in result["rows"]]
     db.upsert_email_settings(
-        user.id,
+        LOCAL_USER,
         {
             "last_polled_at": datetime.datetime.now(
                 datetime.timezone.utc
@@ -571,12 +554,12 @@ def _export_response(groups: dict[str, list[dict]], build, base_name: str) -> Re
 
 
 @app.get("/api/export/pohoda.xml")
-def export_pohoda(user: User = Depends(current_user)):
-    groups = _group_by_pohoda_ico(db.list_invoices(user.id))
+def export_pohoda():
+    groups = _group_by_pohoda_ico(db.list_invoices(LOCAL_USER))
     return _export_response(groups, build_pohoda_xml, "pohoda-invoices")
 
 
 @app.get("/api/export/pohoda-bank.xml")
-def export_pohoda_bank(user: User = Depends(current_user)):
-    groups = _group_by_pohoda_ico(db.list_bank_statements(user.id))
+def export_pohoda_bank():
+    groups = _group_by_pohoda_ico(db.list_bank_statements(LOCAL_USER))
     return _export_response(groups, build_pohoda_bank_xml, "pohoda-bank")

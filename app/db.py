@@ -491,21 +491,3 @@ def upsert_email_settings(user_id: str, fields: dict) -> dict:
         return _insert(EMAIL_SETTINGS, payload)
     updated = _update(EMAIL_SETTINGS, EMAIL_SETTINGS_ID, payload)
     return updated if updated is not None else existing
-
-
-# --- Stubs kept so app.auth still imports until that module is removed -----
-
-class SupabaseNotConfigured(RuntimeError):
-    """Unused. Kept so ``app.auth`` can still import this name."""
-
-
-def is_email_allowed(email: str) -> bool:
-    """Unused stub. Auth is removed in a later step."""
-    del email
-    return False
-
-
-def get_user_from_token(access_token: str) -> Optional[dict]:
-    """Unused stub. Auth is removed in a later step."""
-    del access_token
-    return None
