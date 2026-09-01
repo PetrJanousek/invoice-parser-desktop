@@ -18,7 +18,12 @@
     #langToggle .flag { font-size:1rem; line-height:1; }
     main { max-width:min(1800px,98vw); margin:1.4rem auto; padding:0 1.4rem; }
     .card { background:#fff; border:1px solid var(--border); border-radius:10px; padding:1.2rem; margin-bottom:1.2rem; }
-    #updateBanner { background:#eef3ff; border:1px solid #b7cbf5; border-radius:10px; padding:.8rem 1.2rem; margin-bottom:1.2rem; display:flex; align-items:center; gap:1rem; flex-wrap:wrap; }
+    #updateBanner { background:#eef3ff; border:1px solid #b7cbf5; border-radius:10px; padding:.8rem 1.2rem; margin-bottom:1.2rem; align-items:center; gap:1rem; flex-wrap:wrap; }
+    /* :not(.hidden) so this doesn't outrank .hidden's display:none — an ID
+       selector's own display:flex would otherwise always win over the class
+       rule regardless of which one is toggled on, showing the banner (and
+       its button) unconditionally. */
+    #updateBanner:not(.hidden) { display:flex; }
     #updateBanner .msg { flex:1; font-size:.88rem; }
     button.primary { font:inherit; background:var(--blue); color:#fff; border:none; border-radius:7px; padding:.5rem .9rem; cursor:pointer; }
     button.primary:disabled { opacity:.5; cursor:default; }
@@ -313,6 +318,7 @@
       update_available: (v) => `A new version (${v}) is available.`,
       update_installing: () => "Downloading and installing the update… the app will restart automatically. On Windows you may see a one-time permission prompt — click Yes.",
       update_failed: (msg) => "Update failed: " + msg,
+      update_up_to_date: () => "You're already on the latest version.",
       set_heading: "Email inbox",
       set_hint: 'Connect an inbox so the app can read invoice PDFs from unread emails. Nothing is read automatically unless you turn on auto-read below — use the "Read emails now" button on the Invoices tab.',
       label_provider: "Provider", label_email_address: "Email address",
@@ -408,6 +414,7 @@
       update_available: (v) => `Je dostupná nová verze (${v}).`,
       update_installing: () => "Stahuji a instaluji aktualizaci… aplikace se automaticky restartuje. Ve Windows se může jednorázově zobrazit žádost o oprávnění — klikněte na Ano.",
       update_failed: (msg) => "Aktualizace selhala: " + msg,
+      update_up_to_date: () => "Již máte nejnovější verzi.",
       set_heading: "E-mailová schránka",
       set_hint: 'Připojte schránku, aby aplikace mohla číst PDF faktury z nepřečtených e-mailů. Nic se nenačítá automaticky, dokud níže nezapnete automatické načítání — použijte tlačítko „Načíst e-maily“ na záložce Faktury.',
       label_provider: "Poskytovatel", label_email_address: "E-mailová adresa",
@@ -531,8 +538,10 @@
       latestUpdate = u;
       if (u.available && u.latest_version) {
         $("updateMsg").textContent = t("update_available", u.latest_version);
+        show("updateNowBtn", true);
         show("updateBanner", true);
       } else {
+        $("updateMsg").textContent = "";
         show("updateBanner", false);
       }
     } catch(e){ /* ignore — update check is best-effort */ }
@@ -546,9 +555,19 @@
       // else to do here; the message above already reflects that.
     } catch(e){
       $("updateNowBtn").disabled = false;
-      // The backend's error text (app/updater.py) is already user-facing
-      // and covers the unsupported-platform case, so just surface it as-is.
-      $("updateMsg").textContent = t("update_failed", e.message);
+      // Re-verify instead of trusting stale state: if it turns out there's
+      // genuinely no update (e.g. this click raced with the banner going
+      // stale), resync to the "up to date" state rather than leaving a
+      // enabled "Update now" button sitting behind an error message.
+      await checkForUpdate();
+      if (latestUpdate && latestUpdate.available) {
+        $("updateMsg").textContent = t("update_failed", e.message);
+      } else {
+        show("updateNowBtn", false);
+        $("updateMsg").textContent = t("update_up_to_date");
+        show("updateBanner", true);
+        setTimeout(() => show("updateBanner", false), 4000);
+      }
     }
   };
 
