@@ -15,6 +15,8 @@ Routes:
   PUT    /api/email-settings     -> save email settings (password encrypted)
   GET    /api/llm-settings       -> current LLM provider/model config (no keys)
   PUT    /api/llm-settings       -> save LLM provider + API key (key encrypted)
+  GET    /api/update-check       -> is a newer GitHub Release available
+  POST   /api/update/apply       -> download + silently install it (Windows only for now)
   POST   /api/emails/read        -> read up to N unread emails, parse, store
   GET    /api/export/pohoda.xml  -> all invoices as a Pohoda dataPack
 """
@@ -46,6 +48,7 @@ from .llm import (
 )
 from .pohoda import build_pohoda_bank_xml, build_pohoda_xml
 from .schemas import BANK_STATEMENT_FIELDS, FIELDS
+from . import updater
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 INDEX = BASE_DIR / "web" / "index.html"
@@ -545,6 +548,32 @@ def save_llm_settings(payload: dict):
     get_chat_model.cache_clear()
     get_vision_chat_model.cache_clear()
     return read_llm_settings()
+
+
+# --- Update check ------------------------------------------------------------
+
+@app.get("/api/update-check")
+def update_check():
+    return updater.check_for_update()
+
+
+@app.post("/api/update/apply")
+def update_apply():
+    """Download and silently install the latest release, then exit.
+
+    Windows only for now (see app/updater.py) — the installer's
+    CloseApplications/RestartApplications close this process and relaunch it
+    once the update is in place, so nothing else needs to happen here beyond
+    telling the frontend it's underway.
+    """
+    check = updater.check_for_update()
+    if not check["available"] or not check["download_url"]:
+        raise HTTPException(status_code=400, detail="No update available.")
+    try:
+        updater.apply_windows_update(check["download_url"])
+    except updater.UpdateApplyError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"status": "installing"}
 
 
 @app.post("/api/emails/read")

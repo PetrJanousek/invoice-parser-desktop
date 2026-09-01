@@ -28,6 +28,13 @@ SolidCompression=yes
 WizardStyle=modern
 UninstallDisplayIcon={app}\{#MyAppExeName}
 ArchitecturesInstallIn64BitMode=x64compatible
+; Auto-update support (app/updater.py runs this installer with /VERYSILENT
+; /SUPPRESSMSGBOXES /CLOSEAPPLICATIONS /RESTARTAPPLICATIONS): these two
+; tell Setup to find and close the running app (it detects it via open
+; handles on the exe/dlls being overwritten — no AppMutex needed) and
+; relaunch it once the update is installed.
+CloseApplications=yes
+RestartApplications=yes
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"

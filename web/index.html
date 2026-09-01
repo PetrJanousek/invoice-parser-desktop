@@ -18,6 +18,8 @@
     #langToggle .flag { font-size:1rem; line-height:1; }
     main { max-width:min(1800px,98vw); margin:1.4rem auto; padding:0 1.4rem; }
     .card { background:#fff; border:1px solid var(--border); border-radius:10px; padding:1.2rem; margin-bottom:1.2rem; }
+    #updateBanner { background:#eef3ff; border:1px solid #b7cbf5; border-radius:10px; padding:.8rem 1.2rem; margin-bottom:1.2rem; display:flex; align-items:center; gap:1rem; flex-wrap:wrap; }
+    #updateBanner .msg { flex:1; font-size:.88rem; }
     button.primary { font:inherit; background:var(--blue); color:#fff; border:none; border-radius:7px; padding:.5rem .9rem; cursor:pointer; }
     button.primary:disabled { opacity:.5; cursor:default; }
     button.ghost { font:inherit; background:#fff; color:var(--blue); border:1px solid #b7cbf5; border-radius:7px; padding:.45rem .8rem; cursor:pointer; text-decoration:none; display:inline-block; }
@@ -93,6 +95,12 @@
   </header>
 
   <main>
+    <!-- Update available -->
+    <div id="updateBanner" class="hidden">
+      <span class="msg" id="updateMsg"></span>
+      <button class="primary" id="updateNowBtn" data-i18n="update_now_btn">Update now</button>
+    </div>
+
     <!-- Invoices -->
     <div id="invoicesView" class="hidden">
       <div class="card">
@@ -301,6 +309,11 @@
       st_llm_settings_saving: () => "Saving…",
       st_llm_settings_saved: () => "Saved.",
       st_llm_settings_save_failed: (msg) => "Save failed: " + msg,
+      update_now_btn: "Update now",
+      update_available: (v) => `A new version (${v}) is available.`,
+      update_installing: () => "Downloading and installing the update… the app will restart automatically. If Windows asks for permission, click Yes.",
+      update_failed: (msg) => "Update failed: " + msg,
+      update_unsupported: () => "Automatic update isn't available on this platform yet — download the new version from the release page.",
       set_heading: "Email inbox",
       set_hint: 'Connect an inbox so the app can read invoice PDFs from unread emails. Nothing is read automatically unless you turn on auto-read below — use the "Read emails now" button on the Invoices tab.',
       label_provider: "Provider", label_email_address: "Email address",
@@ -392,6 +405,11 @@
       st_llm_settings_saving: () => "Ukládám…",
       st_llm_settings_saved: () => "Uloženo.",
       st_llm_settings_save_failed: (msg) => "Uložení selhalo: " + msg,
+      update_now_btn: "Aktualizovat",
+      update_available: (v) => `Je dostupná nová verze (${v}).`,
+      update_installing: () => "Stahuji a instaluji aktualizaci… aplikace se automaticky restartuje. Pokud se Windows zeptají na oprávnění, klikněte na Ano.",
+      update_failed: (msg) => "Aktualizace selhala: " + msg,
+      update_unsupported: () => "Automatická aktualizace zatím na této platformě není dostupná — stáhněte novou verzi ze stránky s vydáními.",
       set_heading: "E-mailová schránka",
       set_hint: 'Připojte schránku, aby aplikace mohla číst PDF faktury z nepřečtených e-mailů. Nic se nenačítá automaticky, dokud níže nezapnete automatické načítání — použijte tlačítko „Načíst e-maily“ na záložce Faktury.',
       label_provider: "Poskytovatel", label_email_address: "E-mailová adresa",
@@ -458,6 +476,7 @@
     renderBankStatements(bankCache);
     loadSettings();
     loadLlmSettings();
+    checkForUpdate();
   }
 
   // ---- app -----------------------------------------------------------------
@@ -503,7 +522,37 @@
     loadBankStatements();
     loadSettings();
     loadLlmSettings();
+    checkForUpdate();
   })();
+
+  // ---- update check ----
+  let latestUpdate = null;
+  async function checkForUpdate(){
+    try {
+      const u = await api("/api/update-check");
+      latestUpdate = u;
+      if (u.available && u.latest_version) {
+        $("updateMsg").textContent = t("update_available", u.latest_version);
+        show("updateBanner", true);
+      } else {
+        show("updateBanner", false);
+      }
+    } catch(e){ /* ignore — update check is best-effort */ }
+  }
+  $("updateNowBtn").onclick = async () => {
+    $("updateNowBtn").disabled = true;
+    $("updateMsg").textContent = t("update_installing");
+    try {
+      await api("/api/update/apply", { method:"POST" });
+      // On success the app is about to be closed by the installer — nothing
+      // else to do here; the message above already reflects that.
+    } catch(e){
+      $("updateNowBtn").disabled = false;
+      $("updateMsg").textContent = /windows/i.test(e.message)
+        ? t("update_unsupported")
+        : t("update_failed", e.message);
+    }
+  };
 
   // ---- nav ----
   document.querySelectorAll("#nav button").forEach(b => b.onclick = () => switchView(b.dataset.view));
