@@ -311,9 +311,8 @@
       st_llm_settings_save_failed: (msg) => "Save failed: " + msg,
       update_now_btn: "Update now",
       update_available: (v) => `A new version (${v}) is available.`,
-      update_installing: () => "Downloading and installing the update… the app will restart automatically. If Windows asks for permission, click Yes.",
+      update_installing: () => "Downloading and installing the update… the app will restart automatically. On Windows you may see a one-time permission prompt — click Yes.",
       update_failed: (msg) => "Update failed: " + msg,
-      update_unsupported: () => "Automatic update isn't available on this platform yet — download the new version from the release page.",
       set_heading: "Email inbox",
       set_hint: 'Connect an inbox so the app can read invoice PDFs from unread emails. Nothing is read automatically unless you turn on auto-read below — use the "Read emails now" button on the Invoices tab.',
       label_provider: "Provider", label_email_address: "Email address",
@@ -407,9 +406,8 @@
       st_llm_settings_save_failed: (msg) => "Uložení selhalo: " + msg,
       update_now_btn: "Aktualizovat",
       update_available: (v) => `Je dostupná nová verze (${v}).`,
-      update_installing: () => "Stahuji a instaluji aktualizaci… aplikace se automaticky restartuje. Pokud se Windows zeptají na oprávnění, klikněte na Ano.",
+      update_installing: () => "Stahuji a instaluji aktualizaci… aplikace se automaticky restartuje. Ve Windows se může jednorázově zobrazit žádost o oprávnění — klikněte na Ano.",
       update_failed: (msg) => "Aktualizace selhala: " + msg,
-      update_unsupported: () => "Automatická aktualizace zatím na této platformě není dostupná — stáhněte novou verzi ze stránky s vydáními.",
       set_heading: "E-mailová schránka",
       set_hint: 'Připojte schránku, aby aplikace mohla číst PDF faktury z nepřečtených e-mailů. Nic se nenačítá automaticky, dokud níže nezapnete automatické načítání — použijte tlačítko „Načíst e-maily“ na záložce Faktury.',
       label_provider: "Poskytovatel", label_email_address: "E-mailová adresa",
@@ -548,9 +546,9 @@
       // else to do here; the message above already reflects that.
     } catch(e){
       $("updateNowBtn").disabled = false;
-      $("updateMsg").textContent = /windows/i.test(e.message)
-        ? t("update_unsupported")
-        : t("update_failed", e.message);
+      // The backend's error text (app/updater.py) is already user-facing
+      // and covers the unsupported-platform case, so just surface it as-is.
+      $("updateMsg").textContent = t("update_failed", e.message);
     }
   };
 
