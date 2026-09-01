@@ -24,11 +24,6 @@ anthropic==0.118.0
 pydantic==2.10.4
 pydantic-settings==2.7.1
 
-# Supabase access is over its REST/Auth HTTP API (PostgREST + GoTrue) via httpx
-# — the SDK is intentionally not used, so the new sb_publishable_/sb_secret_
-# key format works.
-httpx==0.28.1
-
 # Encrypt stored email credentials at rest
 cryptography==44.0.0
 
