@@ -13,6 +13,8 @@ Routes:
   POST   /api/bank-statements/{id}/report -> flag/unflag one statement
   GET    /api/email-settings     -> current user's email settings (no password)
   PUT    /api/email-settings     -> save email settings (password encrypted)
+  GET    /api/llm-settings       -> current LLM provider/model config (no keys)
+  PUT    /api/llm-settings       -> save LLM provider + API key (key encrypted)
   POST   /api/emails/read        -> read up to N unread emails, parse, store
   GET    /api/export/pohoda.xml  -> all invoices as a Pohoda dataPack
 """
@@ -32,11 +34,16 @@ from fastapi.responses import (
 from starlette.concurrency import run_in_threadpool
 
 from . import bank_parsers, db, extract
-from .config import settings
+from .config import apply_stored_llm_settings, settings
 from .crypto import encrypt
 from .email_ingest import PROVIDERS, EmailConfigError, read_unread
 from .extract import PdfTextError
-from .llm import active_model_label, active_vision_model_label
+from .llm import (
+    active_model_label,
+    active_vision_model_label,
+    get_chat_model,
+    get_vision_chat_model,
+)
 from .pohoda import build_pohoda_bank_xml, build_pohoda_xml
 from .schemas import BANK_STATEMENT_FIELDS, FIELDS
 
@@ -44,6 +51,14 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 INDEX = BASE_DIR / "web" / "index.html"
 
 app = FastAPI(title="Invoice Parser")
+
+# Overlay any LLM provider/API-key settings saved via the Settings screen onto
+# the live `settings` singleton before the app starts serving requests. No
+# startup-event convention exists elsewhere in this codebase, so this runs
+# directly at import time — main.py is only imported once per process.
+apply_stored_llm_settings()
+
+LLM_PROVIDERS = ("anthropic", "openai", "google", "ollama")
 
 # Fields a user is allowed to edit via PATCH: the extracted fields, plus
 # pohoda_ico (manually entered — never extracted, so it's not in FIELDS).
@@ -472,6 +487,64 @@ def save_email_settings(payload: dict):
 
     db.upsert_email_settings(LOCAL_USER, fields)
     return read_email_settings()
+
+
+# --- LLM settings ------------------------------------------------------------
+
+@app.get("/api/llm-settings")
+def read_llm_settings():
+    # `settings` is the live source of truth after startup (mutated in place
+    # by apply_stored_llm_settings()), so read off it directly rather than
+    # the DB row. Never return raw keys — only whether one is set.
+    return {
+        "provider": settings.llm_provider,
+        "model": settings.llm_model,
+        "vision_model": settings.llm_vision_model,
+        "ollama_url": settings.ollama_url,
+        "has_anthropic_key": bool(settings.anthropic_api_key),
+        "has_openai_key": bool(settings.openai_api_key),
+        "has_google_key": bool(settings.google_api_key),
+    }
+
+
+@app.put("/api/llm-settings")
+def save_llm_settings(payload: dict):
+    provider = payload.get("provider")
+    if provider is not None and provider not in LLM_PROVIDERS:
+        raise HTTPException(
+            status_code=400, detail=f"Unknown provider {provider!r}."
+        )
+
+    fields: dict = {}
+    if "provider" in payload:
+        fields["provider"] = provider
+    if "model" in payload:
+        fields["model"] = payload.get("model")
+    if "vision_model" in payload:
+        fields["vision_model"] = payload.get("vision_model")
+    if "ollama_url" in payload:
+        fields["ollama_url"] = payload.get("ollama_url")
+
+    # Only overwrite the encrypted key for the active provider (the one this
+    # request implies is active: the newly-given provider, else the current
+    # one), and only when a non-empty key was actually supplied — same
+    # "blank means keep existing" pattern the email password already uses.
+    api_key = payload.get("api_key")
+    if api_key:
+        active_provider = provider or settings.llm_provider
+        key_column = {
+            "anthropic": "anthropic_api_key_encrypted",
+            "openai": "openai_api_key_encrypted",
+            "google": "google_api_key_encrypted",
+        }.get(active_provider)
+        if key_column:
+            fields[key_column] = encrypt(api_key)
+
+    db.upsert_llm_settings(LOCAL_USER, fields)
+    apply_stored_llm_settings()
+    get_chat_model.cache_clear()
+    get_vision_chat_model.cache_clear()
+    return read_llm_settings()
 
 
 @app.post("/api/emails/read")
