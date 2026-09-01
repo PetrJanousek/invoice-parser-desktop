@@ -14,7 +14,6 @@
     header .spacer { flex:1; }
     nav button { font:inherit; font-size:.85rem; background:none; border:none; color:#475467; cursor:pointer; padding:.35rem .6rem; border-radius:6px; }
     nav button.active { background:#eef3ff; color:var(--blue); font-weight:600; }
-    .who { font-size:.8rem; color:var(--muted); }
     #langToggle { font:inherit; font-size:.85rem; display:inline-flex; align-items:center; gap:.35rem; background:#fff; border:1px solid var(--border); border-radius:20px; padding:.25rem .7rem; cursor:pointer; }
     #langToggle .flag { font-size:1rem; line-height:1; }
     main { max-width:min(1800px,98vw); margin:1.4rem auto; padding:0 1.4rem; }
@@ -78,7 +77,6 @@
     .toggle { display:flex; align-items:center; gap:.5rem; margin-top:.8rem; }
     .toggle input { width:auto; }
     .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:1rem; }
-    .authwrap { max-width:380px; margin:4rem auto; }
     .hint { font-size:.8rem; color:var(--muted); margin-top:.5rem; }
   </style>
 </head>
@@ -91,40 +89,10 @@
       <button data-view="invoices" class="active" data-i18n="nav_invoices">Invoices</button>
       <button data-view="settings" data-i18n="nav_settings">Settings</button>
     </nav>
-    <span class="who" id="who"></span>
     <button id="langToggle" title="Language / Jazyk"></button>
-    <button class="ghost hidden" id="signout" data-i18n="signout">Sign out</button>
   </header>
 
   <main>
-    <!-- Not-configured banner -->
-    <div class="card hidden" id="notConfigured">
-      <strong data-i18n="notcfg_title">Backend not configured yet.</strong>
-      <p class="hint" data-i18n-html="notcfg_body"></p>
-    </div>
-
-    <!-- Auth -->
-    <div class="authwrap hidden" id="authView">
-      <div class="card">
-        <h2 style="margin-top:0;font-size:1.05rem;" data-i18n="auth_heading">Sign in</h2>
-        <label data-i18n="label_email">Email</label>
-        <input id="authEmail" type="email" autocomplete="username" />
-        <label data-i18n="label_password">Password</label>
-        <input id="authPassword" type="password" autocomplete="current-password" />
-        <div class="row-actions" style="margin-top:1rem;">
-          <button class="primary" id="signinBtn" data-i18n="signin_btn">Sign in</button>
-          <button class="ghost" id="signupBtn" data-i18n="signup_btn">Create account</button>
-        </div>
-        <div class="status" id="authStatus"></div>
-      </div>
-    </div>
-
-    <!-- Pending approval (signed in but email not on the allowlist) -->
-    <div class="card hidden" id="pendingApproval">
-      <strong data-i18n="pending_title">Your account isn’t approved yet.</strong>
-      <p class="hint" data-i18n="pending_body"></p>
-    </div>
-
     <!-- Invoices -->
     <div id="invoicesView" class="hidden">
       <div class="card">
@@ -252,20 +220,13 @@
     </div>
   </main>
 
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script>
   // ---- i18n ----------------------------------------------------------------
   const I18N = {
     en: {
       _flag: "🇬🇧", _name: "EN",
       app_title: "Invoice Parser",
-      nav_invoices: "Invoices", nav_settings: "Settings", signout: "Sign out",
-      notcfg_title: "Backend not configured yet.",
-      notcfg_body: 'Create a free Supabase project, run <code>supabase/schema.sql</code>, and fill the <code>SUPABASE_*</code> values in <code>.env</code> (see README). The app will show login once that’s done.',
-      pending_title: "Your account isn’t approved yet.",
-      pending_body: "Access is invite-only. Send your email address to the administrator to be added, then sign out and back in.",
-      auth_heading: "Sign in", label_email: "Email", label_password: "Password",
-      signin_btn: "Sign in", signup_btn: "Create account",
+      nav_invoices: "Invoices", nav_settings: "Settings",
       drop_title: "Drag & drop invoice PDFs",
       drop_sub: "or click to choose files — you can select several at once",
       read_count_label: "Emails to read:",
@@ -328,9 +289,6 @@
         "<li>(Server <code>imap.seznam.cz:993</code> is used automatically.)</li>" +
         "</ol>",
       // dynamic
-      st_signing_in: () => "Signing in…",
-      st_creating: () => "Creating account…",
-      st_account_created: () => "Account created — check your email if confirmation is required, then sign in.",
       st_parsing: (name, i, n) => `Parsing ${name} … (${i}/${n})`,
       st_upload_done: (files, rows, issues) => `Done — ${files} file(s), ${rows} row(s)${issues ? `, ${issues} with issues` : ""}.`,
       st_failed_on: (name, msg) => `Failed on ${name}: ${msg}`,
@@ -350,13 +308,7 @@
     cs: {
       _flag: "🇨🇿", _name: "CZ",
       app_title: "Parser faktur",
-      nav_invoices: "Faktury", nav_settings: "Nastavení", signout: "Odhlásit se",
-      notcfg_title: "Backend zatím není nakonfigurován.",
-      notcfg_body: 'Vytvořte si zdarma projekt Supabase, spusťte <code>supabase/schema.sql</code> a vyplňte hodnoty <code>SUPABASE_*</code> v <code>.env</code> (viz README). Po dokončení se zobrazí přihlášení.',
-      pending_title: "Váš účet zatím není schválen.",
-      pending_body: "Přístup je pouze na pozvání. Zašlete svou e-mailovou adresu správci, aby vás přidal, poté se odhlaste a znovu přihlaste.",
-      auth_heading: "Přihlášení", label_email: "E-mail", label_password: "Heslo",
-      signin_btn: "Přihlásit se", signup_btn: "Vytvořit účet",
+      nav_invoices: "Faktury", nav_settings: "Nastavení",
       drop_title: "Přetáhněte sem PDF faktury",
       drop_sub: "nebo klikněte pro výběr souborů — můžete jich vybrat více najednou",
       read_count_label: "Počet e-mailů:",
@@ -418,9 +370,6 @@
         "<li>Výše: Poskytovatel = Seznam.cz, E-mail = vaše adresa @seznam.cz, Heslo aplikace = toto heslo.</li>" +
         "<li>(Server <code>imap.seznam.cz:993</code> se použije automaticky.)</li>" +
         "</ol>",
-      st_signing_in: () => "Přihlašuji…",
-      st_creating: () => "Vytvářím účet…",
-      st_account_created: () => "Účet vytvořen — pokud je vyžadováno potvrzení, zkontrolujte e-mail, poté se přihlaste.",
       st_parsing: (name, i, n) => `Zpracovávám ${name} … (${i}/${n})`,
       st_upload_done: (files, rows, issues) => `Hotovo — ${files} soubor(ů), ${rows} řádek(ů)${issues ? `, ${issues} s problémy` : ""}.`,
       st_failed_on: (name, msg) => `Chyba u ${name}: ${msg}`,
@@ -462,7 +411,7 @@
     applyStaticI18n();
     renderRows(rowsCache);   // re-render dynamic table bits in the new language
     renderBankStatements(bankCache);
-    if (token) loadSettings();
+    loadSettings();
   }
 
   // ---- app -----------------------------------------------------------------
@@ -472,14 +421,14 @@
   // Editable bank-statement header cells (order = column order in the parent row).
   const BANK_HEADER_COLS = ["account_number","currency","opening_balance","closing_balance","pohoda_ico"];
   const TXN_COLS = ["date","counterparty_name","counterparty_account","variable_symbol","description","amount","balance_after"];
-  let sb = null, token = null, cfg = null, rowsCache = [], bankCache = [];
+  let cfg = null, rowsCache = [], bankCache = [];
 
   const $ = id => document.getElementById(id);
   function show(id, on=true){ $(id).classList.toggle("hidden", !on); }
   function setStatus(el, msg, kind=""){ const e=$(el); e.textContent=msg||""; e.className="status "+kind; }
 
   async function api(path, opts={}) {
-    const headers = Object.assign({}, opts.headers, { "Authorization": "Bearer " + token });
+    const headers = Object.assign({}, opts.headers);
     if (opts.json !== undefined) { headers["Content-Type"]="application/json"; opts.body=JSON.stringify(opts.json); }
     const resp = await fetch(path, Object.assign({}, opts, { headers }));
     if (!resp.ok) { let d; try{d=await resp.json();}catch(e){} const err=new Error(d?.detail || ("HTTP "+resp.status)); err.status=resp.status; throw err; }
@@ -497,49 +446,17 @@
     const lim = $("emailLimit");
     lim.value = cfg.email_batch_cap || 20;
     if (cfg.email_batch_max) lim.max = cfg.email_batch_max;
-    if (!cfg.supabase_configured) { show("notConfigured", true); return; }
-    sb = supabase.createClient(cfg.supabase_url, cfg.supabase_anon_key);
-    const { data } = await sb.auth.getSession();
-    if (data.session) { onSignedIn(data.session); } else { show("authView", true); }
-    sb.auth.onAuthStateChange((_e, session) => {
-      if (session) onSignedIn(session);
-    });
-  })();
-
-  async function onSignedIn(session){
-    token = session.access_token;
-    show("authView", false); show("signout", true);
-    $("who").textContent = session.user.email;
-    // Probe an authenticated endpoint: a 403 means the email is signed in but
-    // not on the access allowlist -> show the pending-approval notice instead
-    // of the (empty) app shell. Any other outcome shows the app normally.
     try {
       rowsCache = await api("/api/rows");
     } catch(e){
-      if (e.status === 403){ show("pendingApproval", true); show("nav", false); return; }
       setStatus("status", t("st_load_failed", e.message), "error");
     }
-    show("pendingApproval", false);
     show("nav", true);
     switchView("invoices");
     if (rowsCache) renderRows(rowsCache);
     loadBankStatements();
     loadSettings();
-  }
-
-  // ---- auth ----
-  $("signinBtn").onclick = async () => {
-    setStatus("authStatus", t("st_signing_in"));
-    const { error } = await sb.auth.signInWithPassword({ email:$("authEmail").value, password:$("authPassword").value });
-    if (error) setStatus("authStatus", error.message, "error");
-  };
-  $("signupBtn").onclick = async () => {
-    setStatus("authStatus", t("st_creating"));
-    const { error } = await sb.auth.signUp({ email:$("authEmail").value, password:$("authPassword").value });
-    if (error) setStatus("authStatus", error.message, "error");
-    else setStatus("authStatus", t("st_account_created"), "ok");
-  };
-  $("signout").onclick = async () => { await sb.auth.signOut(); location.reload(); };
+  })();
 
   // ---- nav ----
   document.querySelectorAll("#nav button").forEach(b => b.onclick = () => switchView(b.dataset.view));
@@ -702,7 +619,7 @@
   // fills in live. Returns a {added, issues} summary (added = documents shown).
   async function uploadOne(file){
     const fd = new FormData(); fd.append("file", file);
-    const resp = await fetch("/api/upload", { method:"POST", headers:{ "Authorization":"Bearer "+token }, body:fd });
+    const resp = await fetch("/api/upload", { method:"POST", body:fd });
     if (!resp.ok){ let d; try{ d=await resp.json(); }catch(e){} const err=new Error(d?.detail || ("HTTP "+resp.status)); err.status=resp.status; throw err; }
     const summary = { added:0, issues:0 };
     const handle = (ev) => {
@@ -917,7 +834,7 @@
   }
   async function loadBankStatements(){
     try { bankCache = await api("/api/bank-statements"); renderBankStatements(bankCache); }
-    catch(e){ /* a 403 (not approved) is handled on the invoices load */ }
+    catch(e){ /* ignore */ }
   }
 
   // ---- settings ----
