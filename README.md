@@ -1,27 +1,27 @@
-# Invoice Parser (cloud-deployable)
+# Invoice Parser (desktop)
 
-Local-first invoice parser, rebuilt to run as a hosted, multi-tenant web app.
-Users log in, upload PDF invoices (or pull them from an email inbox), a local or
-cloud LLM extracts the fields, and results land in an editable table. Czech
-invoices (IČO / variabilní symbol / bank account) and Pohoda XML export are
-supported.
+Local-first invoice parser desktop app. Upload PDF invoices and receipts (or
+pull them from an email inbox), a local or cloud LLM extracts the fields, and
+results land in an editable table. Czech invoices (IČO / variabilní symbol /
+bank account), Pohoda XML export, and bank statement parsing are supported.
 
 - **Backend:** FastAPI (Python)
-- **LLM:** LangChain, provider-switchable — `anthropic` | `openai` | `ollama`
-- **DB + Auth:** Supabase (Postgres + Auth), multi-tenant with Row-Level Security
-- **Host:** Render free tier (100-min request limit handles the email batch)
+- **UI:** pywebview native window over the web UI
+- **Storage:** SQLite on disk (no cloud database)
+- **LLM:** LangChain, provider-switchable — `anthropic` | `openai` | `google` | `ollama`
 
-Same code runs locally and on Render — only environment variables differ.
+Everything runs on your machine.
 
 ## Layout
 
 ```
-app/            FastAPI app, LLM abstraction, extraction, email ingest, Pohoda
-web/            single-page UI (login, editable table, settings)
-evals/          extraction eval cases + runner
-tests/          pytest (Pohoda unit tests + extraction eval threshold)
-supabase/       schema.sql (tables + RLS)
-render.yaml     Render blueprint
+app/                  FastAPI backend, LLM abstraction, extraction, email ingest, Pohoda
+web/                  single-page UI (editable table, settings)
+desktop_app.py        pywebview entry point
+desktop_app.spec      PyInstaller build spec
+evals/                extraction eval cases + runner
+tests/                pytest
+.github/workflows/    CI desktop builds (macOS + Windows)
 ```
 
 ## Run locally
@@ -30,35 +30,50 @@ Requires [uv](https://github.com/astral-sh/uv). For the local LLM, install
 [Ollama](https://ollama.com) and pull a model (`ollama pull qwen2.5:7b`).
 
 ```bash
-cd invoice-parser
 uv venv --python 3.12
 uv pip install -r requirements.txt
 
 cp .env.example .env
-# Generate an encryption key and paste it into .env (APP_ENCRYPTION_KEY):
-python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+# .env is only needed if you use a cloud LLM provider.
+# Ollama (the default) needs no API keys.
 
+uv run python desktop_app.py
+```
+
+That launches a native window. For backend-only dev/debugging, run the API
+in a browser instead:
+
+```bash
 uv run uvicorn app.main:app --reload --port 8000
 # open http://localhost:8000
 ```
 
-With `LLM_PROVIDER=ollama` (the default) no API keys are needed. The app boots
-without Supabase, but login and stored data need a Supabase project (below).
+With `LLM_PROVIDER=ollama` (the default) no API keys are needed.
 
-### Supabase setup (needed for login + storage)
+## Building the packaged app
 
-1. Create a free project at <https://supabase.com>.
-2. In **SQL Editor**, run `supabase/schema.sql`.
-3. In **Project Settings → API**, copy into `.env`:
-   - Project URL → `SUPABASE_URL`
-   - `anon` public key → `SUPABASE_ANON_KEY`
-   - `service_role` key → `SUPABASE_SERVICE_KEY`
-4. Restart the app, create an account on the login screen, and sign in.
-   (Tokens are validated against Supabase's auth server, so no JWT secret is
-   needed and it works with any project signing configuration.)
+```bash
+pip install pyinstaller
+pyinstaller desktop_app.spec
+```
 
-Local dev and the deployed app can point at the **same** Supabase project, so
-behavior is identical in both.
+This is a **onedir** build (a folder, not a single file):
+
+- macOS: `dist/Invoice Parser.app`
+- Windows: `dist/Invoice Parser/Invoice Parser.exe`
+
+The GitHub Actions workflow (`.github/workflows/desktop-build.yml`) builds both
+platforms on push to `main` and on manual dispatch, then uploads the artifacts.
+
+## Data storage
+
+Local data lives under the OS app-data directory (via `platformdirs`):
+
+- macOS: `~/Library/Application Support/InvoiceParser`
+- Windows: `%APPDATA%\InvoiceParser`
+
+That directory holds the SQLite database, uploaded PDFs, and the auto-generated
+encryption key (`secret.key`). Override the location with the `DATA_DIR` env var.
 
 ## Evals
 
@@ -75,26 +90,15 @@ should be higher.
 ## Switching the LLM
 
 Set `LLM_PROVIDER` (and the matching key). Default model per provider:
-`anthropic → claude-haiku-4-5`, `openai → gpt-4o-mini`, `ollama → qwen2.5:7b`.
-Override with `LLM_MODEL`. **Ollama is dev-only** — production on Render uses a
-cloud provider (see `render.yaml`).
+`anthropic → claude-haiku-4-5`, `openai → gpt-4o-mini`,
+`google → gemini-flash-latest`, `ollama → qwen2.5:7b`.
+Override with `LLM_MODEL`. Ollama needs no API key.
 
 ## Email ingestion
 
 In **Settings**, connect a **Gmail** or **Seznam.cz** inbox (step-by-step
-instructions are shown there). Passwords are encrypted at rest with
-`APP_ENCRYPTION_KEY`. Nothing is read automatically unless you enable the
-auto-read toggle (off by default) — use the **Read emails now** button, which
-scans up to 20 unread messages and parses their PDF attachments.
-
-## Deploy to Render
-
-1. Push this repo to GitHub.
-2. Render → **New → Blueprint** → pick the repo (it reads `render.yaml`).
-3. Set the secret env vars in the dashboard: `ANTHROPIC_API_KEY` (or
-   `OPENAI_API_KEY`), the three `SUPABASE_*` values, and `APP_ENCRYPTION_KEY`
-   (use the **same** key as any existing stored credentials).
-4. Deploy. Health check is `GET /api/health`.
-
-Notes: the free tier sleeps after ~15 min idle (~1 min cold start) — hit the URL
-a minute before a demo. No OCR yet — scanned/image PDFs are stored with an error.
+instructions are shown there). Passwords are encrypted at rest with a Fernet
+key that the app generates and stores in `secret.key` on first use. Nothing is
+read automatically unless you enable the auto-read toggle (off by default) —
+use the **Read emails now** button, which scans up to 20 unread messages and
+parses their PDF attachments.
