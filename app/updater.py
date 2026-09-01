@@ -29,7 +29,7 @@ VERSION_FILE = BASE_DIR / "VERSION"
 # Per-platform release asset name (see the release job's `files:` list).
 _ASSET_NAMES = {
     "Windows": "InvoiceParserSetup.exe",
-    "Darwin": "Invoice Parser-mac.zip",
+    "Darwin": "Invoice-Parser-mac.zip",
 }
 
 # Avoid hitting the GitHub API on every UI load/reload.
@@ -203,7 +203,7 @@ def apply_macos_update(download_url: str) -> None:
         )
 
     tmp_dir = Path(tempfile.mkdtemp(prefix="invoice-parser-update-"))
-    zip_path = tmp_dir / "Invoice Parser-mac.zip"
+    zip_path = tmp_dir / "Invoice-Parser-mac.zip"
     try:
         urllib.request.urlretrieve(download_url, zip_path)
     except (urllib.error.URLError, OSError) as exc:

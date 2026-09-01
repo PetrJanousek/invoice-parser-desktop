@@ -61,14 +61,14 @@ jobs:
       - name: Zip macOS app
         if: matrix.os == 'macos-latest'
         # ditto (not zip) preserves the .app bundle structure/metadata correctly.
-        run: ditto -c -k --sequesterRsrc --keepParent "dist/Invoice Parser.app" "Invoice Parser-mac.zip"
+        run: ditto -c -k --sequesterRsrc --keepParent "dist/Invoice Parser.app" "Invoice-Parser-mac.zip"
 
       - name: Upload macOS app zip
         if: matrix.os == 'macos-latest'
         uses: actions/upload-artifact@v4
         with:
           name: invoice-parser-macos-zip
-          path: Invoice Parser-mac.zip
+          path: Invoice-Parser-mac.zip
 
   release:
     needs: build
@@ -104,4 +104,4 @@ jobs:
           generate_release_notes: true
           files: |
             release-assets/InvoiceParserSetup.exe
-            release-assets/Invoice Parser-mac.zip
+            release-assets/Invoice-Parser-mac.zip
