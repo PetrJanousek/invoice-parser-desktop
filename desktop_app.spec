@@ -7,8 +7,14 @@ under uvicorn in a background thread and shows it in a pywebview window.
 """
 
 import sys
+from pathlib import Path
 
 block_cipher = None
+
+# SPECPATH is injected by PyInstaller as the directory containing this spec
+# file (repo root) — read the app version once here so it's available both
+# for the [Files]/datas bundling below and the macOS Info.plist.
+APP_VERSION = (Path(SPECPATH) / "VERSION").read_text().strip()
 
 # uvicorn's loop/protocol/lifespan implementations are picked dynamically at
 # runtime ("auto" selects uvloop/asyncio, h11/httptools, etc.), which
@@ -42,7 +48,7 @@ a = Analysis(
     # Path(__file__).resolve().parent.parent when frozen (both the frozen
     # "app" package and PyInstaller datas live under sys._MEIPASS in onedir
     # mode), so no change to app/main.py's path resolution is needed.
-    datas=[("web", "web")],
+    datas=[("web", "web"), ("VERSION", ".")],
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
@@ -94,8 +100,8 @@ if sys.platform == "darwin":
         info_plist={
             "CFBundleName": "Invoice Parser",
             "CFBundleDisplayName": "Invoice Parser",
-            "CFBundleShortVersionString": "1.0.0",
-            "CFBundleVersion": "1.0.0",
+            "CFBundleShortVersionString": APP_VERSION,
+            "CFBundleVersion": APP_VERSION,
             "NSHighResolutionCapable": "True",
         },
     )
