@@ -182,6 +182,33 @@
     <!-- Settings -->
     <div id="settingsView" class="hidden">
       <div class="card">
+        <h2 style="margin-top:0;font-size:1.05rem;" data-i18n="llm_heading">LLM provider</h2>
+        <p class="hint" data-i18n="llm_hint">Choose which AI provider extracts data from your invoices. Anthropic (Claude) is the default.</p>
+        <div class="grid2">
+          <div>
+            <label data-i18n="label_llm_provider">Provider</label>
+            <select id="llmProvider">
+              <option value="anthropic">Anthropic (Claude)</option>
+              <option value="openai">OpenAI</option>
+              <option value="google">Google Gemini</option>
+              <option value="ollama">Ollama (local)</option>
+            </select>
+          </div>
+          <div id="llmApiKeyRow">
+            <label><span data-i18n="label_llm_api_key">API key</span> <span id="llmKeySet" class="hint"></span></label>
+            <input id="llmApiKey" type="password" data-i18n-ph="llm_key_placeholder" />
+          </div>
+          <div id="llmOllamaUrlRow" class="hidden">
+            <label data-i18n="label_ollama_url">Ollama URL</label>
+            <input id="ollamaUrl" type="text" placeholder="http://localhost:11434" />
+          </div>
+        </div>
+        <div class="row-actions" style="margin-top:1rem;">
+          <button class="primary" id="saveLlmSettingsBtn" data-i18n="save_btn">Save</button>
+        </div>
+        <div class="status" id="llmSettingsStatus"></div>
+      </div>
+      <div class="card">
         <h2 style="margin-top:0;font-size:1.05rem;" data-i18n="set_heading">Email inbox</h2>
         <p class="hint" data-i18n="set_hint">Connect an inbox so the app can read invoice PDFs from unread emails.</p>
         <div class="grid2">
@@ -265,6 +292,15 @@
       txn_none: "No transactions extracted.",
       confirm_delete_bank: () => "Delete this bank statement?",
       tip_edit: "Tip: click any field cell to edit it — corrections save automatically. One PDF can hold several invoices; each becomes its own row. Set the Pohoda IČO column (pick dodavatel or objednatel) before exporting so Pohoda accepts the import.",
+      llm_heading: "LLM provider",
+      llm_hint: "Choose which AI provider extracts data from your invoices. Anthropic (Claude) is the default.",
+      label_llm_provider: "Provider", label_llm_api_key: "API key",
+      llm_key_set: "(a key is saved)", llm_key_not_set: "(no key saved)",
+      llm_key_placeholder: "paste your API key (leave blank to keep current)",
+      label_ollama_url: "Ollama URL",
+      st_llm_settings_saving: () => "Saving…",
+      st_llm_settings_saved: () => "Saved.",
+      st_llm_settings_save_failed: (msg) => "Save failed: " + msg,
       set_heading: "Email inbox",
       set_hint: 'Connect an inbox so the app can read invoice PDFs from unread emails. Nothing is read automatically unless you turn on auto-read below — use the "Read emails now" button on the Invoices tab.',
       label_provider: "Provider", label_email_address: "Email address",
@@ -347,6 +383,15 @@
       txn_none: "Nebyly extrahovány žádné transakce.",
       confirm_delete_bank: () => "Smazat tento bankovní výpis?",
       tip_edit: "Tip: klikněte na libovolnou buňku pro úpravu — opravy se ukládají automaticky. Jedno PDF může obsahovat více faktur; každá se zobrazí jako samostatný řádek. Před exportem nastavte sloupec IČO pro Pohodu (dodavatel nebo objednatel), jinak Pohoda import odmítne.",
+      llm_heading: "Poskytovatel AI",
+      llm_hint: "Vyberte, který poskytovatel AI extrahuje data z vašich faktur. Výchozí je Anthropic (Claude).",
+      label_llm_provider: "Poskytovatel", label_llm_api_key: "API klíč",
+      llm_key_set: "(klíč je uložen)", llm_key_not_set: "(klíč není uložen)",
+      llm_key_placeholder: "vložte svůj API klíč (ponechte prázdné pro zachování stávajícího)",
+      label_ollama_url: "Adresa Ollama",
+      st_llm_settings_saving: () => "Ukládám…",
+      st_llm_settings_saved: () => "Uloženo.",
+      st_llm_settings_save_failed: (msg) => "Uložení selhalo: " + msg,
       set_heading: "E-mailová schránka",
       set_hint: 'Připojte schránku, aby aplikace mohla číst PDF faktury z nepřečtených e-mailů. Nic se nenačítá automaticky, dokud níže nezapnete automatické načítání — použijte tlačítko „Načíst e-maily“ na záložce Faktury.',
       label_provider: "Poskytovatel", label_email_address: "E-mailová adresa",
@@ -412,6 +457,7 @@
     renderRows(rowsCache);   // re-render dynamic table bits in the new language
     renderBankStatements(bankCache);
     loadSettings();
+    loadLlmSettings();
   }
 
   // ---- app -----------------------------------------------------------------
@@ -456,6 +502,7 @@
     if (rowsCache) renderRows(rowsCache);
     loadBankStatements();
     loadSettings();
+    loadLlmSettings();
   })();
 
   // ---- nav ----
@@ -836,6 +883,39 @@
     try { bankCache = await api("/api/bank-statements"); renderBankStatements(bankCache); }
     catch(e){ /* ignore */ }
   }
+
+  // ---- LLM settings ----
+  function updateLlmProviderVisibility(){
+    const isOllama = $("llmProvider").value === "ollama";
+    show("llmApiKeyRow", !isOllama);
+    show("llmOllamaUrlRow", isOllama);
+  }
+  $("llmProvider").onchange = updateLlmProviderVisibility;
+  async function loadLlmSettings(){
+    try {
+      const s = await api("/api/llm-settings");
+      if (s.provider) $("llmProvider").value = s.provider;
+      $("ollamaUrl").value = s.ollama_url || "";
+      const hasKey = { anthropic: s.has_anthropic_key, openai: s.has_openai_key, google: s.has_google_key }[$("llmProvider").value];
+      $("llmKeySet").textContent = hasKey ? t("llm_key_set") : t("llm_key_not_set");
+      updateLlmProviderVisibility();
+    } catch(e){ /* ignore */ }
+  }
+  $("saveLlmSettingsBtn").onclick = async () => {
+    setStatus("llmSettingsStatus", t("st_llm_settings_saving"));
+    try {
+      await api("/api/llm-settings", { method:"PUT", json:{
+        provider:$("llmProvider").value,
+        api_key:$("llmApiKey").value || undefined,
+        ollama_url:$("ollamaUrl").value || undefined,
+      }});
+      $("llmApiKey").value="";
+      await loadLlmSettings();
+      cfg = await (await fetch("/api/config")).json();
+      $("modelBadge").textContent = "model: " + cfg.model;
+      setStatus("llmSettingsStatus", t("st_llm_settings_saved"), "ok");
+    } catch(e){ setStatus("llmSettingsStatus", t("st_llm_settings_save_failed", e.message), "error"); }
+  };
 
   // ---- settings ----
   async function loadSettings(){

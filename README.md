@@ -26,16 +26,20 @@ tests/                pytest
 
 ## Run locally
 
-Requires [uv](https://github.com/astral-sh/uv). For the local LLM, install
-[Ollama](https://ollama.com) and pull a model (`ollama pull qwen2.5:7b`).
+Requires [uv](https://github.com/astral-sh/uv). The default LLM provider is
+Anthropic (Claude Haiku), which needs an API key — set it either in `.env` or
+from the app's **Settings** screen after first launch (no restart needed).
+For a free local LLM instead, install [Ollama](https://ollama.com), pull a
+model (`ollama pull qwen2.5:7b`), and switch the provider to `ollama` (via
+`.env` or Settings).
 
 ```bash
 uv venv --python 3.12
 uv pip install -r requirements.txt
 
 cp .env.example .env
-# .env is only needed if you use a cloud LLM provider.
-# Ollama (the default) needs no API keys.
+# .env is optional — you can also set the provider and API key from the
+# app's Settings screen instead of editing this file.
 
 uv run python desktop_app.py
 ```
@@ -48,7 +52,9 @@ uv run uvicorn app.main:app --reload --port 8000
 # open http://localhost:8000
 ```
 
-With `LLM_PROVIDER=ollama` (the default) no API keys are needed.
+With `LLM_PROVIDER=anthropic` (the default) you need an `ANTHROPIC_API_KEY`
+— set it in `.env`, or leave it blank and paste the key into the app's
+Settings screen instead. `LLM_PROVIDER=ollama` needs no API key.
 
 ## Building the packaged app
 
@@ -109,7 +115,11 @@ should be higher.
 
 ## Switching the LLM
 
-Set `LLM_PROVIDER` (and the matching key). Default model per provider:
+The easiest way is the app's **Settings** screen: pick a provider, paste an
+API key, and it takes effect immediately — no `.env` edit, no restart.
+
+Alternatively, set `LLM_PROVIDER` (and the matching key) in `.env`. Default
+provider is `anthropic` (Claude Haiku). Default model per provider:
 `anthropic → claude-haiku-4-5`, `openai → gpt-4o-mini`,
 `google → gemini-flash-latest`, `ollama → qwen2.5:7b`.
 Override with `LLM_MODEL`. Ollama needs no API key.

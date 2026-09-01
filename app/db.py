@@ -21,9 +21,13 @@ INVOICES = "invoices"
 BANK_STATEMENTS = "bank_statements"
 REPORTED_DOCUMENTS = "reported_documents"
 EMAIL_SETTINGS = "email_settings"
+LLM_SETTINGS = "llm_settings"
 
 # Single local email-settings row.
 EMAIL_SETTINGS_ID = 1
+
+# Single local llm-settings row.
+LLM_SETTINGS_ID = 1
 
 INVOICE_COLUMNS = (
     "id",
@@ -97,11 +101,25 @@ EMAIL_SETTINGS_COLUMNS = (
     "updated_at",
 )
 
+LLM_SETTINGS_COLUMNS = (
+    "id",
+    "provider",
+    "model",
+    "vision_model",
+    "anthropic_api_key_encrypted",
+    "openai_api_key_encrypted",
+    "google_api_key_encrypted",
+    "ollama_url",
+    "created_at",
+    "updated_at",
+)
+
 _COLUMNS = {
     INVOICES: INVOICE_COLUMNS,
     BANK_STATEMENTS: BANK_STATEMENT_COLUMNS,
     REPORTED_DOCUMENTS: REPORTED_DOCUMENT_COLUMNS,
     EMAIL_SETTINGS: EMAIL_SETTINGS_COLUMNS,
+    LLM_SETTINGS: LLM_SETTINGS_COLUMNS,
 }
 
 _BOOL_COLUMNS = frozenset({"reported", "auto_poll"})
@@ -179,6 +197,19 @@ CREATE TABLE IF NOT EXISTS {EMAIL_SETTINGS} (
     imap_password_encrypted TEXT,
     auto_poll INTEGER NOT NULL DEFAULT 0,
     last_polled_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS {LLM_SETTINGS} (
+    id INTEGER PRIMARY KEY,
+    provider TEXT,
+    model TEXT,
+    vision_model TEXT,
+    anthropic_api_key_encrypted TEXT,
+    openai_api_key_encrypted TEXT,
+    google_api_key_encrypted TEXT,
+    ollama_url TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT
 );
@@ -490,4 +521,24 @@ def upsert_email_settings(user_id: str, fields: dict) -> dict:
         payload.setdefault("auto_poll", False)
         return _insert(EMAIL_SETTINGS, payload)
     updated = _update(EMAIL_SETTINGS, EMAIL_SETTINGS_ID, payload)
+    return updated if updated is not None else existing
+
+
+# --- LLM settings ------------------------------------------------------------
+
+def get_llm_settings(user_id: str) -> Optional[dict]:
+    del user_id
+    return _get_by_id(LLM_SETTINGS, LLM_SETTINGS_ID)
+
+
+def upsert_llm_settings(user_id: str, fields: dict) -> dict:
+    del user_id
+    payload = _pick(fields, LLM_SETTINGS_COLUMNS)
+    payload.pop("id", None)
+    existing = get_llm_settings("")
+    if existing is None:
+        payload["id"] = LLM_SETTINGS_ID
+        payload.setdefault("created_at", _now_iso())
+        return _insert(LLM_SETTINGS, payload)
+    updated = _update(LLM_SETTINGS, LLM_SETTINGS_ID, payload)
     return updated if updated is not None else existing

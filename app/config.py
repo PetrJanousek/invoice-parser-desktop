@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     # anthropic | openai | google : cloud models (need an API key)
     # ollama                      : local, developer-only (no key, no cost)
     # google uses Gemini and has a generous free tier (aistudio.google.com).
-    llm_provider: Literal["anthropic", "openai", "google", "ollama"] = "ollama"
+    llm_provider: Literal["anthropic", "openai", "google", "ollama"] = "anthropic"
     # Optional per-provider model override. Empty -> per-provider default
     # (see app/llm.py DEFAULT_MODELS).
     llm_model: str = ""
@@ -54,3 +54,45 @@ def get_settings() -> Settings:
 
 
 settings = get_settings()
+
+
+def apply_stored_llm_settings() -> None:
+    """Overlay any LLM settings saved via the Settings screen onto ``settings``.
+
+    ``settings`` is a single shared instance every module imports and holds a
+    reference to (``from .config import settings``), so mutating its
+    attributes in place — rather than replacing the object — is immediately
+    visible everywhere (``extract.py``'s ``settings.llm_provider`` checks,
+    ``llm.py``'s ``_build_chat_model``, etc.) with no changes to those
+    modules. Call this once at process startup, and again right after a
+    settings save so the change takes effect without a restart.
+
+    ``db`` is imported lazily here (not at module level) because ``db.py``
+    itself imports ``from .config import settings`` — a top-level import
+    would be circular.
+    """
+    from . import db
+    from .crypto import decrypt
+
+    row = db.get_llm_settings("")
+    if not row:
+        return
+
+    if row.get("provider"):
+        settings.llm_provider = row["provider"]
+    if row.get("model"):
+        settings.llm_model = row["model"]
+    if row.get("vision_model"):
+        settings.llm_vision_model = row["vision_model"]
+    if row.get("ollama_url"):
+        settings.ollama_url = row["ollama_url"]
+
+    key_map = (
+        ("anthropic_api_key_encrypted", "anthropic_api_key"),
+        ("openai_api_key_encrypted", "openai_api_key"),
+        ("google_api_key_encrypted", "google_api_key"),
+    )
+    for encrypted_col, attr in key_map:
+        encrypted = row.get(encrypted_col)
+        if encrypted:
+            setattr(settings, attr, decrypt(encrypted))
