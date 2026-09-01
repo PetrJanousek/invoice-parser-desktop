@@ -1,4 +1,4 @@
-"""Check GitHub Releases for a newer packaged build, and apply it on Windows.
+"""Check GitHub Releases for a newer packaged build, and apply it.
 
 The app's own version lives in the ``VERSION`` file at the repo root, bundled
 alongside ``web/`` by ``desktop_app.spec`` (same ``BASE_DIR``-relative
@@ -8,9 +8,12 @@ is CI's job (see ``.github/workflows/desktop-build.yml``'s ``release`` job) —
 this module only ever reads the public GitHub Releases API, no auth needed.
 """
 import json
+import os
 import platform
 import subprocess
+import sys
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -158,3 +161,108 @@ def apply_windows_update(download_url: str) -> None:
         )
     except OSError as exc:
         raise UpdateApplyError(f"Could not launch the installer: {exc}") from exc
+
+
+def _current_app_bundle() -> Optional[Path]:
+    """The running ``.app`` bundle's path, or None if not running as one.
+
+    True only for a PyInstaller-frozen build launched from inside a
+    ``.app`` (the normal end-user case); a raw ``dist/`` onedir binary run
+    directly, or ``python desktop_app.py`` in dev, has no bundle to replace.
+    """
+    if not getattr(sys, "frozen", False):
+        return None
+    for parent in Path(sys.executable).resolve().parents:
+        if parent.suffix == ".app":
+            return parent
+    return None
+
+
+def apply_macos_update(download_url: str) -> None:
+    """Download the macOS app zip and swap it in, then relaunch and exit.
+
+    macOS doesn't lock a running executable's files the way Windows does, but
+    replacing the bundle *while it's still executing* is still asking for a
+    half-written .app if something goes wrong mid-copy. So instead: download
+    and unzip the new .app into a temp dir, then spawn a small detached shell
+    helper that waits for this process to exit, swaps the old bundle for the
+    new one, relaunches it, and cleans up — and only then does this process
+    exit itself (``os._exit`` after a short delay, so the HTTP response
+    announcing "installing" has time to reach the frontend first).
+
+    Only supported when running from a packaged .app; raises UpdateApplyError
+    otherwise, or if the download/unzip/spawn itself fails.
+    """
+    if platform.system() != "Darwin":
+        raise UpdateApplyError("This update path is only implemented on macOS.")
+
+    app_bundle = _current_app_bundle()
+    if app_bundle is None:
+        raise UpdateApplyError(
+            "Automatic update only works for the installed app — not the dev server."
+        )
+
+    tmp_dir = Path(tempfile.mkdtemp(prefix="invoice-parser-update-"))
+    zip_path = tmp_dir / "Invoice Parser-mac.zip"
+    try:
+        urllib.request.urlretrieve(download_url, zip_path)
+    except (urllib.error.URLError, OSError) as exc:
+        raise UpdateApplyError(f"Could not download the update: {exc}") from exc
+
+    extract_dir = tmp_dir / "extracted"
+    extract_dir.mkdir()
+    try:
+        # ditto (not zipfile/unzip) is what CI used to create the zip
+        # (--keepParent), and correctly restores bundle metadata on extract.
+        subprocess.run(
+            ["ditto", "-x", "-k", str(zip_path), str(extract_dir)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (subprocess.CalledProcessError, OSError) as exc:
+        raise UpdateApplyError(f"Could not unpack the update: {exc}") from exc
+
+    new_app = extract_dir / app_bundle.name
+    if not new_app.exists():
+        raise UpdateApplyError("Downloaded update is missing the app bundle.")
+
+    helper_script = tmp_dir / "apply_update.sh"
+    helper_script.write_text(
+        f"""#!/bin/bash
+set -e
+# Wait for the running app to exit before touching its bundle.
+while kill -0 {os.getpid()} 2>/dev/null; do sleep 0.3; done
+rm -rf "{app_bundle}"
+mv "{new_app}" "{app_bundle}"
+open -n "{app_bundle}"
+rm -rf "{tmp_dir}"
+"""
+    )
+    helper_script.chmod(0o755)
+
+    try:
+        subprocess.Popen(
+            ["/bin/bash", str(helper_script)],
+            start_new_session=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except OSError as exc:
+        raise UpdateApplyError(f"Could not launch the updater: {exc}") from exc
+
+    # Give the HTTP response time to flush back to the frontend before this
+    # process disappears out from under it; os._exit is a hard exit that
+    # works regardless of pywebview's blocking main thread.
+    threading.Timer(1.0, lambda: os._exit(0)).start()
+
+
+def apply_update(download_url: str) -> None:
+    """Dispatch to the current platform's silent-update implementation."""
+    system = platform.system()
+    if system == "Windows":
+        apply_windows_update(download_url)
+    elif system == "Darwin":
+        apply_macos_update(download_url)
+    else:
+        raise UpdateApplyError(f"Automatic update isn't supported on {system}.")

@@ -561,16 +561,18 @@ def update_check():
 def update_apply():
     """Download and silently install the latest release, then exit.
 
-    Windows only for now (see app/updater.py) — the installer's
-    CloseApplications/RestartApplications close this process and relaunch it
-    once the update is in place, so nothing else needs to happen here beyond
-    telling the frontend it's underway.
+    Dispatches to the current platform's implementation (see
+    app/updater.py): on Windows, the installer's CloseApplications/
+    RestartApplications close this process and relaunch it once the update
+    is in place; on macOS, this process exits itself once its own detached
+    helper is ready to take over. Either way, nothing else needs to happen
+    here beyond telling the frontend it's underway.
     """
     check = updater.check_for_update()
     if not check["available"] or not check["download_url"]:
         raise HTTPException(status_code=400, detail="No update available.")
     try:
-        updater.apply_windows_update(check["download_url"])
+        updater.apply_update(check["download_url"])
     except updater.UpdateApplyError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"status": "installing"}
