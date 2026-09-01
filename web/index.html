@@ -1,0 +1,949 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Invoice Parser</title>
+  <style>
+    :root { --blue:#2f6feb; --border:#e4e7ec; --muted:#98a2b3; --bg:#f7f8fa; --red:#d92d20; --green:#079455; }
+    * { box-sizing: border-box; }
+    body { font-family: system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; margin:0; background:var(--bg); color:#1d2433; }
+    header { display:flex; align-items:center; gap:1rem; padding:.8rem 1.4rem; background:#fff; border-bottom:1px solid var(--border); flex-wrap:wrap; }
+    header h1 { font-size:1.1rem; margin:0; }
+    .badge { font-size:.72rem; background:#eef2ff; color:#3538cd; border-radius:20px; padding:.2rem .6rem; }
+    header .spacer { flex:1; }
+    nav button { font:inherit; font-size:.85rem; background:none; border:none; color:#475467; cursor:pointer; padding:.35rem .6rem; border-radius:6px; }
+    nav button.active { background:#eef3ff; color:var(--blue); font-weight:600; }
+    .who { font-size:.8rem; color:var(--muted); }
+    #langToggle { font:inherit; font-size:.85rem; display:inline-flex; align-items:center; gap:.35rem; background:#fff; border:1px solid var(--border); border-radius:20px; padding:.25rem .7rem; cursor:pointer; }
+    #langToggle .flag { font-size:1rem; line-height:1; }
+    main { max-width:min(1800px,98vw); margin:1.4rem auto; padding:0 1.4rem; }
+    .card { background:#fff; border:1px solid var(--border); border-radius:10px; padding:1.2rem; margin-bottom:1.2rem; }
+    button.primary { font:inherit; background:var(--blue); color:#fff; border:none; border-radius:7px; padding:.5rem .9rem; cursor:pointer; }
+    button.primary:disabled { opacity:.5; cursor:default; }
+    button.ghost { font:inherit; background:#fff; color:var(--blue); border:1px solid #b7cbf5; border-radius:7px; padding:.45rem .8rem; cursor:pointer; text-decoration:none; display:inline-block; }
+    input, select { font:inherit; padding:.5rem .6rem; border:1px solid var(--border); border-radius:7px; width:100%; }
+    label { font-size:.82rem; color:#475467; display:block; margin:.6rem 0 .25rem; }
+    #drop { border:2px dashed #b6c0d0; border-radius:10px; padding:1.6rem; text-align:center; color:#667085; cursor:pointer; }
+    #drop.hover { border-color:var(--blue); background:#eef3ff; }
+    .row-actions { display:flex; gap:.8rem; align-items:center; flex-wrap:wrap; margin-bottom:1rem; }
+    .read-count { display:flex; align-items:center; gap:.4rem; }
+    .read-count label { margin:0; white-space:nowrap; }
+    .read-count input { width:5rem; }
+    .status { font-size:.85rem; min-height:1.2em; color:var(--blue); }
+    .status.error { color:var(--red); }
+    .status.ok { color:var(--green); }
+    table { width:100%; border-collapse:collapse; font-size:.83rem; background:#fff; }
+    th,td { padding:.45rem .55rem; border-bottom:1px solid #eef0f4; text-align:left; white-space:nowrap; }
+    th { background:#f9fafb; font-weight:600; color:#475467; position:sticky; top:0; }
+    th.grp { text-align:center; color:#667085; font-size:.74rem; text-transform:uppercase; letter-spacing:.03em; }
+    th.grp.supplier { background:#eef3ff; color:#3538cd; }
+    th.grp.customer { background:#f0fdf4; color:#067647; }
+    th.gstart, td.gstart { border-left:2px solid #e4e7ec; }
+    /* document-type pill (editable) — width:auto so it isn't squeezed by the
+       global `select{width:100%}` rule when a neighbouring column is wide. */
+    select.doctype { width:auto; min-width:5.5rem; font:inherit; font-size:.72rem; font-weight:600; border-radius:20px;
+      padding:.15rem 1.3rem .15rem .6rem; border:1px solid transparent; cursor:pointer;
+      -webkit-appearance:none; appearance:none; background-position:right .45rem center;
+      background-repeat:no-repeat; background-size:.6rem;
+      background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' stroke='%23667085' fill='none' stroke-width='1.5'/></svg>"); }
+    select.doctype[data-type="invoice"] { background-color:#eef2ff; color:#3538cd; border-color:#c7d2fe; }
+    select.doctype[data-type="receipt"] { background-color:#ecfdf3; color:#067647; border-color:#a6f4c5; }
+    select.doctype[data-type="other"], select.doctype[data-type=""] { background-color:#f2f4f7; color:#475467; border-color:#e4e7ec; }
+    td.edit { cursor:text; }
+    td.edit:focus { outline:2px solid var(--blue); background:#fbfdff; }
+    td.muted { color:#cbd2dc; }
+    td.src { max-width:15rem; overflow:hidden; text-overflow:ellipsis; }
+    tr.failed td { color:var(--red); }
+    .table-wrap { overflow-x:auto; border:1px solid var(--border); border-radius:10px; }
+    td.tgl { text-align:center; padding:.2rem .3rem; }
+    button.tglbtn { font:inherit; font-size:.9rem; background:none; border:none; color:var(--blue); cursor:pointer; line-height:1; padding:.1rem .3rem; }
+    tr.txn-detail > td { background:#f9fafb; }
+    table.subtable { background:#fff; border:1px solid var(--border); border-radius:8px; font-size:.8rem; }
+    table.subtable th { background:#f3f5f9; position:static; }
+    /* Long free-text columns are truncated to a readable width; clicking a cell
+       focuses it for editing and expands it back to full content. */
+    table.subtable td.clamp { max-width:44ch; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    table.subtable td.clamp:focus { max-width:none; white-space:normal; overflow:visible; }
+    td.amt-neg { color:var(--red); text-align:right; }
+    td.amt-pos { color:var(--green); text-align:right; }
+    button.del { font:inherit; font-size:.78rem; color:var(--red); background:#fff; border:1px solid #f2c1bc; border-radius:6px; padding:.15rem .5rem; cursor:pointer; }
+    button.report { font:inherit; font-size:.78rem; color:#b54708; background:#fff; border:1px solid #fedf89; border-radius:6px; padding:.15rem .5rem; cursor:pointer; margin-right:.3rem; }
+    button.report.on { background:#fef0c7; border-color:#f79009; font-weight:600; }
+    button.report:disabled { opacity:.5; cursor:default; }
+    details { margin-top:.6rem; font-size:.85rem; }
+    details summary { cursor:pointer; color:var(--blue); }
+    details ol { margin:.5rem 0; padding-left:1.3rem; line-height:1.5; }
+    .hidden { display:none; }
+    .toggle { display:flex; align-items:center; gap:.5rem; margin-top:.8rem; }
+    .toggle input { width:auto; }
+    .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:1rem; }
+    .authwrap { max-width:380px; margin:4rem auto; }
+    .hint { font-size:.8rem; color:var(--muted); margin-top:.5rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1 data-i18n="app_title">Invoice Parser</h1>
+    <span class="badge" id="modelBadge">…</span>
+    <div class="spacer"></div>
+    <nav id="nav" class="hidden">
+      <button data-view="invoices" class="active" data-i18n="nav_invoices">Invoices</button>
+      <button data-view="settings" data-i18n="nav_settings">Settings</button>
+    </nav>
+    <span class="who" id="who"></span>
+    <button id="langToggle" title="Language / Jazyk"></button>
+    <button class="ghost hidden" id="signout" data-i18n="signout">Sign out</button>
+  </header>
+
+  <main>
+    <!-- Not-configured banner -->
+    <div class="card hidden" id="notConfigured">
+      <strong data-i18n="notcfg_title">Backend not configured yet.</strong>
+      <p class="hint" data-i18n-html="notcfg_body"></p>
+    </div>
+
+    <!-- Auth -->
+    <div class="authwrap hidden" id="authView">
+      <div class="card">
+        <h2 style="margin-top:0;font-size:1.05rem;" data-i18n="auth_heading">Sign in</h2>
+        <label data-i18n="label_email">Email</label>
+        <input id="authEmail" type="email" autocomplete="username" />
+        <label data-i18n="label_password">Password</label>
+        <input id="authPassword" type="password" autocomplete="current-password" />
+        <div class="row-actions" style="margin-top:1rem;">
+          <button class="primary" id="signinBtn" data-i18n="signin_btn">Sign in</button>
+          <button class="ghost" id="signupBtn" data-i18n="signup_btn">Create account</button>
+        </div>
+        <div class="status" id="authStatus"></div>
+      </div>
+    </div>
+
+    <!-- Pending approval (signed in but email not on the allowlist) -->
+    <div class="card hidden" id="pendingApproval">
+      <strong data-i18n="pending_title">Your account isn’t approved yet.</strong>
+      <p class="hint" data-i18n="pending_body"></p>
+    </div>
+
+    <!-- Invoices -->
+    <div id="invoicesView" class="hidden">
+      <div class="card">
+        <div id="drop">
+          <strong data-i18n="drop_title">Drag &amp; drop invoice PDFs</strong><br />
+          <span class="hint" data-i18n="drop_sub">or click to choose files — you can select several at once</span>
+          <input id="fileInput" type="file" accept="application/pdf" multiple class="hidden" />
+        </div>
+        <div class="row-actions" style="margin-top:1rem;">
+          <span class="read-count">
+            <label for="emailLimit" data-i18n="read_count_label">Emails to read:</label>
+            <input id="emailLimit" type="number" min="1" value="20" />
+          </span>
+          <button class="primary" id="readEmailsBtn" data-i18n="read_emails">Read emails now</button>
+          <button class="ghost" id="exportBtn" data-i18n="export_btn">Export all → Pohoda XML</button>
+          <button class="ghost" id="refreshBtn" data-i18n="refresh_btn">Refresh</button>
+        </div>
+        <div class="status" id="status"></div>
+        <details>
+          <summary data-i18n="pohoda_manual_summary">How to import the exported XML into Pohoda (manual)</summary>
+          <div data-i18n-html="pohoda_manual_body"></div>
+        </details>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th rowspan="2" data-i18n="th_file">File</th>
+              <th rowspan="2" data-i18n="th_type">Type</th>
+              <th class="grp supplier gstart" colspan="2" data-i18n="th_supplier">Dodavatel (issued by)</th>
+              <th class="grp customer gstart" colspan="2" data-i18n="th_customer">Odběratel (billed to)</th>
+              <th rowspan="2" class="gstart" data-i18n="th_invoice_no">Invoice #</th>
+              <th rowspan="2" data-i18n="th_vs">VS</th>
+              <th rowspan="2" data-i18n="th_invoice_date">Invoice date</th>
+              <th rowspan="2" data-i18n="th_due_date">Due date</th>
+              <th rowspan="2" data-i18n="th_currency">Curr.</th>
+              <th rowspan="2" data-i18n="th_subtotal">Subtotal</th>
+              <th rowspan="2" data-i18n="th_tax">Tax</th>
+              <th rowspan="2" data-i18n="th_total">Total</th>
+              <th rowspan="2" data-i18n="th_bank">Bank account</th>
+              <th rowspan="2" data-i18n="th_pohoda_ico">Pohoda IČO</th>
+              <th rowspan="2" data-i18n="th_source">Source</th>
+              <th rowspan="2"></th>
+            </tr>
+            <tr>
+              <th class="gstart" data-i18n="th_name">Name</th><th data-i18n="th_ico">IČO</th>
+              <th class="gstart" data-i18n="th_name">Name</th><th data-i18n="th_ico">IČO</th>
+            </tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+      <p class="hint" data-i18n="tip_edit">Tip: click any field cell to edit it — corrections save automatically. One PDF can hold several invoices; each becomes its own row.</p>
+
+      <!-- Bank statements -->
+      <div class="card" style="margin-top:1.6rem;" id="bankCard">
+        <div class="row-actions" style="margin-bottom:.6rem;">
+          <h2 style="margin:0;font-size:1.05rem;flex:1;" data-i18n="bank_heading">Bank statements</h2>
+          <button class="ghost" id="exportBankBtn" data-i18n="export_bank_btn">Export all → Pohoda (Banka) XML</button>
+        </div>
+        <p class="hint" id="bankEmpty" data-i18n="bank_empty">No bank statements yet — upload a statement PDF (výpis z účtu) above and it will appear here.</p>
+        <div class="table-wrap hidden" id="bankTableWrap">
+          <table>
+            <thead>
+              <tr>
+                <th></th>
+                <th data-i18n="th_file">File</th>
+                <th data-i18n="bth_account">Account</th>
+                <th data-i18n="bth_period">Period</th>
+                <th data-i18n="th_currency">Curr.</th>
+                <th data-i18n="bth_opening">Opening</th>
+                <th data-i18n="bth_closing">Closing</th>
+                <th data-i18n="bth_count"># Txns</th>
+                <th data-i18n="th_pohoda_ico">Pohoda IČO</th>
+                <th data-i18n="th_source">Source</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="bankRows"></tbody>
+          </table>
+        </div>
+        <p class="hint" data-i18n="bank_tip_edit">Tip: click ▸ to show a statement’s transactions. Click any cell to edit — corrections save automatically. Export sends each transaction to Pohoda’s Banka agenda.</p>
+      </div>
+    </div>
+
+    <!-- Settings -->
+    <div id="settingsView" class="hidden">
+      <div class="card">
+        <h2 style="margin-top:0;font-size:1.05rem;" data-i18n="set_heading">Email inbox</h2>
+        <p class="hint" data-i18n="set_hint">Connect an inbox so the app can read invoice PDFs from unread emails.</p>
+        <div class="grid2">
+          <div>
+            <label data-i18n="label_provider">Provider</label>
+            <select id="provider">
+              <option value="gmail">Gmail</option>
+              <option value="seznam">Seznam.cz</option>
+            </select>
+          </div>
+          <div>
+            <label data-i18n="label_email_address">Email address</label>
+            <input id="emailAddress" type="email" />
+          </div>
+        </div>
+        <label><span data-i18n="label_app_password">App password</span> <span id="pwSet" class="hint"></span></label>
+        <input id="emailPassword" type="password" data-i18n-ph="pw_placeholder" />
+        <div class="toggle">
+          <input type="checkbox" id="autoPoll" />
+          <label for="autoPoll" style="margin:0;" data-i18n="autopoll_label">Automatically read new emails as they arrive (default off)</label>
+        </div>
+        <div class="row-actions" style="margin-top:1rem;">
+          <button class="primary" id="saveSettingsBtn" data-i18n="save_btn">Save</button>
+        </div>
+        <div class="status" id="settingsStatus"></div>
+
+        <details>
+          <summary data-i18n="gmail_summary">How to get a Gmail app password</summary>
+          <div data-i18n-html="gmail_body"></div>
+        </details>
+        <details>
+          <summary data-i18n="seznam_summary">How to enable IMAP on Seznam.cz</summary>
+          <div data-i18n-html="seznam_body"></div>
+        </details>
+      </div>
+    </div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script>
+  // ---- i18n ----------------------------------------------------------------
+  const I18N = {
+    en: {
+      _flag: "🇬🇧", _name: "EN",
+      app_title: "Invoice Parser",
+      nav_invoices: "Invoices", nav_settings: "Settings", signout: "Sign out",
+      notcfg_title: "Backend not configured yet.",
+      notcfg_body: 'Create a free Supabase project, run <code>supabase/schema.sql</code>, and fill the <code>SUPABASE_*</code> values in <code>.env</code> (see README). The app will show login once that’s done.',
+      pending_title: "Your account isn’t approved yet.",
+      pending_body: "Access is invite-only. Send your email address to the administrator to be added, then sign out and back in.",
+      auth_heading: "Sign in", label_email: "Email", label_password: "Password",
+      signin_btn: "Sign in", signup_btn: "Create account",
+      drop_title: "Drag & drop invoice PDFs",
+      drop_sub: "or click to choose files — you can select several at once",
+      read_count_label: "Emails to read:",
+      read_emails: "Read emails now", export_btn: "Export all → Pohoda XML", refresh_btn: "Refresh",
+      pohoda_manual_summary: "How to import the exported XML into Pohoda (manual)",
+      pohoda_manual_body:
+        "<ol>" +
+        "<li>Click <b>Export all → Pohoda XML</b> above and save the <code>pohoda-invoices.xml</code> file.</li>" +
+        "<li>Open <b>Pohoda</b> and select the accounting unit (agenda) you want to import into.</li>" +
+        "<li>Go to <b>Soubor → Datová komunikace → XML import/export</b>.</li>" +
+        "<li>Choose <b>Import</b>, set the input file to the saved <code>pohoda-invoices.xml</code>, and leave the log/output path as suggested.</li>" +
+        "<li>Click <b>OK / Další</b> to run the import. Pohoda creates the records under <b>Přijaté faktury</b> (received invoices).</li>" +
+        "<li>Open the <b>XML log</b> Pohoda shows afterwards to confirm each invoice imported without errors, then review the created faktury.</li>" +
+        "</ol><p class='hint'>Tip: fix any bad fields in the table first (click a cell) — the export uses the corrected values.</p>",
+      th_file: "File", th_type: "Type",
+      th_supplier: "Dodavatel (issued by)", th_customer: "Odběratel (billed to)",
+      th_name: "Name", th_ico: "IČO", th_invoice_no: "Invoice #", th_vs: "VS",
+      th_invoice_date: "Invoice date", th_due_date: "Due date", th_currency: "Curr.",
+      th_subtotal: "Subtotal", th_tax: "Tax", th_total: "Total",
+      th_bank: "Bank account", th_pohoda_ico: "Pohoda IČO", th_source: "Source",
+      use_vendor_ico_btn: "Use dodavatel IČO", use_customer_ico_btn: "Use objednatel IČO",
+      dt_invoice: "invoice", dt_receipt: "receipt", dt_other: "other", dt_blank: "—",
+      del_btn: "Delete",
+      report_btn: "Report", reported_btn: "Reported",
+      report_title: "Report this row for review",
+      reported_title: "Reported for review — click to undo",
+      st_report_failed: (msg) => "Report failed: " + msg,
+      bank_heading: "Bank statements",
+      export_bank_btn: "Export all → Pohoda (Banka) XML",
+      bank_empty: "No bank statements yet — upload a statement PDF (výpis z účtu) above and it will appear here.",
+      bank_tip_edit: "Tip: click ▸ to show a statement’s transactions. Click any cell to edit — corrections save automatically. Export sends each transaction to Pohoda’s Banka agenda.",
+      bth_account: "Account", bth_period: "Period", bth_opening: "Opening",
+      bth_closing: "Closing", bth_count: "# Txns",
+      txn_date: "Date", txn_party: "Counterparty", txn_party_acc: "Counterparty account",
+      txn_desc: "Description", txn_amount: "Amount", txn_balance: "Balance after",
+      txn_none: "No transactions extracted.",
+      confirm_delete_bank: () => "Delete this bank statement?",
+      tip_edit: "Tip: click any field cell to edit it — corrections save automatically. One PDF can hold several invoices; each becomes its own row. Set the Pohoda IČO column (pick dodavatel or objednatel) before exporting so Pohoda accepts the import.",
+      set_heading: "Email inbox",
+      set_hint: 'Connect an inbox so the app can read invoice PDFs from unread emails. Nothing is read automatically unless you turn on auto-read below — use the "Read emails now" button on the Invoices tab.',
+      label_provider: "Provider", label_email_address: "Email address",
+      label_app_password: "App password", pw_saved: "(a password is saved)",
+      pw_placeholder: "Leave blank to keep existing",
+      autopoll_label: "Automatically read new emails as they arrive (default off)",
+      save_btn: "Save",
+      gmail_summary: "How to get a Gmail app password",
+      gmail_body:
+        "<ol>" +
+        "<li>Go to <b>myaccount.google.com → Security</b> and enable <b>2-Step Verification</b>.</li>" +
+        "<li>Then open <b>Security → App passwords</b>, choose app \"Mail\", and generate a 16-character password.</li>" +
+        "<li>In Gmail, open <b>Settings → Forwarding and POP/IMAP</b> and <b>Enable IMAP</b>.</li>" +
+        "<li>Above: Provider = Gmail, Email = your Gmail address, App password = the 16-char code.</li>" +
+        "</ol>",
+      seznam_summary: "How to enable IMAP on Seznam.cz",
+      seznam_body:
+        "<ol>" +
+        "<li>Log in to Seznam Email → <b>Settings (Nastavení)</b> → <b>IMAP/POP3/SMTP</b>.</li>" +
+        "<li>Enable <b>IMAP</b> and generate/confirm the password for external mail clients.</li>" +
+        "<li>Above: Provider = Seznam.cz, Email = your @seznam.cz address, App password = that password.</li>" +
+        "<li>(Server <code>imap.seznam.cz:993</code> is used automatically.)</li>" +
+        "</ol>",
+      // dynamic
+      st_signing_in: () => "Signing in…",
+      st_creating: () => "Creating account…",
+      st_account_created: () => "Account created — check your email if confirmation is required, then sign in.",
+      st_parsing: (name, i, n) => `Parsing ${name} … (${i}/${n})`,
+      st_upload_done: (files, rows, issues) => `Done — ${files} file(s), ${rows} row(s)${issues ? `, ${issues} with issues` : ""}.`,
+      st_failed_on: (name, msg) => `Failed on ${name}: ${msg}`,
+      st_saved: () => "Saved.",
+      st_save_failed: (msg) => "Save failed: " + msg,
+      st_load_failed: (msg) => "Could not load invoices: " + msg,
+      st_reading: (n) => `Reading unread emails (up to ${n})…`,
+      st_read_result: (s, p, k) => `Scanned ${s}, parsed ${p}, skipped ${k}.`,
+      st_read_failed: (msg) => "Read failed: " + msg,
+      st_export_failed: (msg) => "Export failed: " + msg,
+      st_bank_progress: (n) => `Parsing statement… ${n} transactions so far`,
+      confirm_delete: () => "Delete this invoice?",
+      st_settings_saving: () => "Saving…",
+      st_settings_saved: () => "Saved.",
+      st_settings_save_failed: (msg) => "Save failed: " + msg,
+    },
+    cs: {
+      _flag: "🇨🇿", _name: "CZ",
+      app_title: "Parser faktur",
+      nav_invoices: "Faktury", nav_settings: "Nastavení", signout: "Odhlásit se",
+      notcfg_title: "Backend zatím není nakonfigurován.",
+      notcfg_body: 'Vytvořte si zdarma projekt Supabase, spusťte <code>supabase/schema.sql</code> a vyplňte hodnoty <code>SUPABASE_*</code> v <code>.env</code> (viz README). Po dokončení se zobrazí přihlášení.',
+      pending_title: "Váš účet zatím není schválen.",
+      pending_body: "Přístup je pouze na pozvání. Zašlete svou e-mailovou adresu správci, aby vás přidal, poté se odhlaste a znovu přihlaste.",
+      auth_heading: "Přihlášení", label_email: "E-mail", label_password: "Heslo",
+      signin_btn: "Přihlásit se", signup_btn: "Vytvořit účet",
+      drop_title: "Přetáhněte sem PDF faktury",
+      drop_sub: "nebo klikněte pro výběr souborů — můžete jich vybrat více najednou",
+      read_count_label: "Počet e-mailů:",
+      read_emails: "Načíst e-maily", export_btn: "Exportovat vše → Pohoda XML", refresh_btn: "Obnovit",
+      pohoda_manual_summary: "Jak importovat exportované XML do Pohody (návod)",
+      pohoda_manual_body:
+        "<ol>" +
+        "<li>Klikněte na <b>Exportovat vše → Pohoda XML</b> výše a uložte soubor <code>pohoda-invoices.xml</code>.</li>" +
+        "<li>Otevřete <b>Pohodu</b> a vyberte účetní jednotku (agendu), do které chcete importovat.</li>" +
+        "<li>Přejděte do <b>Soubor → Datová komunikace → XML import/export</b>.</li>" +
+        "<li>Zvolte <b>Import</b>, nastavte vstupní soubor na uložený <code>pohoda-invoices.xml</code> a ponechte navrženou cestu logu/výstupu.</li>" +
+        "<li>Klikněte na <b>OK / Další</b> pro spuštění importu. Pohoda vytvoří záznamy v agendě <b>Přijaté faktury</b>.</li>" +
+        "<li>Otevřete <b>XML log</b>, který Pohoda následně zobrazí, a ověřte, že se každá faktura naimportovala bez chyb, poté zkontrolujte vytvořené faktury.</li>" +
+        "</ol><p class='hint'>Tip: nejprve v tabulce opravte případná chybná pole (klikněte na buňku) — export použije opravené hodnoty.</p>",
+      th_file: "Soubor", th_type: "Typ",
+      th_supplier: "Dodavatel (vystavil)", th_customer: "Odběratel (fakturováno)",
+      th_name: "Název", th_ico: "IČO", th_invoice_no: "Číslo faktury", th_vs: "VS",
+      th_invoice_date: "Datum vystavení", th_due_date: "Datum splatnosti", th_currency: "Měna",
+      th_subtotal: "Bez DPH", th_tax: "DPH", th_total: "Celkem",
+      th_bank: "Bankovní účet", th_pohoda_ico: "IČO pro Pohodu", th_source: "Zdroj",
+      use_vendor_ico_btn: "Použít IČO dodavatele", use_customer_ico_btn: "Použít IČO objednatele",
+      dt_invoice: "faktura", dt_receipt: "účtenka", dt_other: "jiné", dt_blank: "—",
+      del_btn: "Smazat",
+      report_btn: "Nahlásit", reported_btn: "Nahlášeno",
+      report_title: "Nahlásit tento řádek ke kontrole",
+      reported_title: "Nahlášeno ke kontrole — kliknutím zrušíte",
+      st_report_failed: (msg) => "Nahlášení selhalo: " + msg,
+      bank_heading: "Bankovní výpisy",
+      export_bank_btn: "Exportovat vše → Pohoda (Banka) XML",
+      bank_empty: "Zatím žádné bankovní výpisy — nahrajte výše PDF výpisu z účtu a zobrazí se zde.",
+      bank_tip_edit: "Tip: klikněte na ▸ pro zobrazení transakcí výpisu. Klikněte na buňku pro úpravu — opravy se ukládají automaticky. Export odešle každou transakci do agendy Banka v Pohodě.",
+      bth_account: "Účet", bth_period: "Období", bth_opening: "Počáteční",
+      bth_closing: "Konečný", bth_count: "Počet transakcí",
+      txn_date: "Datum", txn_party: "Protistrana", txn_party_acc: "Účet protistrany",
+      txn_desc: "Popis", txn_amount: "Částka", txn_balance: "Zůstatek po",
+      txn_none: "Nebyly extrahovány žádné transakce.",
+      confirm_delete_bank: () => "Smazat tento bankovní výpis?",
+      tip_edit: "Tip: klikněte na libovolnou buňku pro úpravu — opravy se ukládají automaticky. Jedno PDF může obsahovat více faktur; každá se zobrazí jako samostatný řádek. Před exportem nastavte sloupec IČO pro Pohodu (dodavatel nebo objednatel), jinak Pohoda import odmítne.",
+      set_heading: "E-mailová schránka",
+      set_hint: 'Připojte schránku, aby aplikace mohla číst PDF faktury z nepřečtených e-mailů. Nic se nenačítá automaticky, dokud níže nezapnete automatické načítání — použijte tlačítko „Načíst e-maily“ na záložce Faktury.',
+      label_provider: "Poskytovatel", label_email_address: "E-mailová adresa",
+      label_app_password: "Heslo aplikace", pw_saved: "(heslo je uloženo)",
+      pw_placeholder: "Ponechte prázdné pro zachování stávajícího",
+      autopoll_label: "Automaticky načítat nové e-maily při doručení (výchozí vypnuto)",
+      save_btn: "Uložit",
+      gmail_summary: "Jak získat heslo aplikace pro Gmail",
+      gmail_body:
+        "<ol>" +
+        "<li>Přejděte na <b>myaccount.google.com → Zabezpečení</b> a zapněte <b>Dvoufázové ověření</b>.</li>" +
+        "<li>Poté otevřete <b>Zabezpečení → Hesla aplikací</b>, zvolte aplikaci „Mail“ a vygenerujte 16místné heslo.</li>" +
+        "<li>V Gmailu otevřete <b>Nastavení → Přeposílání a POP/IMAP</b> a <b>zapněte IMAP</b>.</li>" +
+        "<li>Výše: Poskytovatel = Gmail, E-mail = vaše adresa Gmail, Heslo aplikace = 16místný kód.</li>" +
+        "</ol>",
+      seznam_summary: "Jak povolit IMAP na Seznam.cz",
+      seznam_body:
+        "<ol>" +
+        "<li>Přihlaste se do Seznam E-mailu → <b>Nastavení</b> → <b>IMAP/POP3/SMTP</b>.</li>" +
+        "<li>Zapněte <b>IMAP</b> a vygenerujte/potvrďte heslo pro externí poštovní klienty.</li>" +
+        "<li>Výše: Poskytovatel = Seznam.cz, E-mail = vaše adresa @seznam.cz, Heslo aplikace = toto heslo.</li>" +
+        "<li>(Server <code>imap.seznam.cz:993</code> se použije automaticky.)</li>" +
+        "</ol>",
+      st_signing_in: () => "Přihlašuji…",
+      st_creating: () => "Vytvářím účet…",
+      st_account_created: () => "Účet vytvořen — pokud je vyžadováno potvrzení, zkontrolujte e-mail, poté se přihlaste.",
+      st_parsing: (name, i, n) => `Zpracovávám ${name} … (${i}/${n})`,
+      st_upload_done: (files, rows, issues) => `Hotovo — ${files} soubor(ů), ${rows} řádek(ů)${issues ? `, ${issues} s problémy` : ""}.`,
+      st_failed_on: (name, msg) => `Chyba u ${name}: ${msg}`,
+      st_saved: () => "Uloženo.",
+      st_save_failed: (msg) => "Uložení selhalo: " + msg,
+      st_load_failed: (msg) => "Nepodařilo se načíst faktury: " + msg,
+      st_reading: (n) => `Načítám nepřečtené e-maily (max ${n})…`,
+      st_read_result: (s, p, k) => `Zkontrolováno ${s}, zpracováno ${p}, přeskočeno ${k}.`,
+      st_read_failed: (msg) => "Načtení selhalo: " + msg,
+      st_export_failed: (msg) => "Export selhal: " + msg,
+      st_bank_progress: (n) => `Zpracovávám výpis… zatím ${n} transakcí`,
+      confirm_delete: () => "Smazat tuto fakturu?",
+      st_settings_saving: () => "Ukládám…",
+      st_settings_saved: () => "Uloženo.",
+      st_settings_save_failed: (msg) => "Uložení selhalo: " + msg,
+    },
+  };
+
+  let lang = localStorage.getItem("lang")
+    || ((navigator.language || "").toLowerCase().startsWith("cs") ? "cs" : "en");
+  if (!I18N[lang]) lang = "en";
+  function t(key, ...args) {
+    const v = (I18N[lang] && I18N[lang][key]);
+    const val = v !== undefined ? v : I18N.en[key];
+    if (val === undefined) return key;
+    return typeof val === "function" ? val(...args) : val;
+  }
+  function applyStaticI18n() {
+    document.documentElement.lang = lang;
+    document.querySelectorAll("[data-i18n]").forEach(el => { el.textContent = t(el.dataset.i18n); });
+    document.querySelectorAll("[data-i18n-html]").forEach(el => { el.innerHTML = t(el.dataset.i18nHtml); });
+    document.querySelectorAll("[data-i18n-ph]").forEach(el => { el.placeholder = t(el.dataset.i18nPh); });
+    const lt = $("langToggle");
+    lt.innerHTML = `<span class="flag">${t("_flag")}</span><span>${t("_name")}</span>`;
+  }
+  function setLang(next) {
+    lang = I18N[next] ? next : "en";
+    localStorage.setItem("lang", lang);
+    applyStaticI18n();
+    renderRows(rowsCache);   // re-render dynamic table bits in the new language
+    renderBankStatements(bankCache);
+    if (token) loadSettings();
+  }
+
+  // ---- app -----------------------------------------------------------------
+  const FIELD_COLS = ["document_type","vendor","ico","customer","customer_ico","invoice_number","variable_symbol","invoice_date","due_date","currency","subtotal","tax","total","bank_account"];
+  const GSTART = new Set(["vendor","customer","invoice_number"]);
+  const DOC_TYPES = ["invoice","receipt","other"];
+  // Editable bank-statement header cells (order = column order in the parent row).
+  const BANK_HEADER_COLS = ["account_number","currency","opening_balance","closing_balance","pohoda_ico"];
+  const TXN_COLS = ["date","counterparty_name","counterparty_account","variable_symbol","description","amount","balance_after"];
+  let sb = null, token = null, cfg = null, rowsCache = [], bankCache = [];
+
+  const $ = id => document.getElementById(id);
+  function show(id, on=true){ $(id).classList.toggle("hidden", !on); }
+  function setStatus(el, msg, kind=""){ const e=$(el); e.textContent=msg||""; e.className="status "+kind; }
+
+  async function api(path, opts={}) {
+    const headers = Object.assign({}, opts.headers, { "Authorization": "Bearer " + token });
+    if (opts.json !== undefined) { headers["Content-Type"]="application/json"; opts.body=JSON.stringify(opts.json); }
+    const resp = await fetch(path, Object.assign({}, opts, { headers }));
+    if (!resp.ok) { let d; try{d=await resp.json();}catch(e){} const err=new Error(d?.detail || ("HTTP "+resp.status)); err.status=resp.status; throw err; }
+    const ct = resp.headers.get("content-type")||"";
+    return ct.includes("application/json") ? resp.json() : resp;
+  }
+
+  $("langToggle").onclick = () => setLang(lang === "en" ? "cs" : "en");
+  applyStaticI18n();
+
+  // ---- boot ----
+  (async function boot(){
+    cfg = await (await fetch("/api/config")).json();
+    $("modelBadge").textContent = "model: " + cfg.model;
+    const lim = $("emailLimit");
+    lim.value = cfg.email_batch_cap || 20;
+    if (cfg.email_batch_max) lim.max = cfg.email_batch_max;
+    if (!cfg.supabase_configured) { show("notConfigured", true); return; }
+    sb = supabase.createClient(cfg.supabase_url, cfg.supabase_anon_key);
+    const { data } = await sb.auth.getSession();
+    if (data.session) { onSignedIn(data.session); } else { show("authView", true); }
+    sb.auth.onAuthStateChange((_e, session) => {
+      if (session) onSignedIn(session);
+    });
+  })();
+
+  async function onSignedIn(session){
+    token = session.access_token;
+    show("authView", false); show("signout", true);
+    $("who").textContent = session.user.email;
+    // Probe an authenticated endpoint: a 403 means the email is signed in but
+    // not on the access allowlist -> show the pending-approval notice instead
+    // of the (empty) app shell. Any other outcome shows the app normally.
+    try {
+      rowsCache = await api("/api/rows");
+    } catch(e){
+      if (e.status === 403){ show("pendingApproval", true); show("nav", false); return; }
+      setStatus("status", t("st_load_failed", e.message), "error");
+    }
+    show("pendingApproval", false);
+    show("nav", true);
+    switchView("invoices");
+    if (rowsCache) renderRows(rowsCache);
+    loadBankStatements();
+    loadSettings();
+  }
+
+  // ---- auth ----
+  $("signinBtn").onclick = async () => {
+    setStatus("authStatus", t("st_signing_in"));
+    const { error } = await sb.auth.signInWithPassword({ email:$("authEmail").value, password:$("authPassword").value });
+    if (error) setStatus("authStatus", error.message, "error");
+  };
+  $("signupBtn").onclick = async () => {
+    setStatus("authStatus", t("st_creating"));
+    const { error } = await sb.auth.signUp({ email:$("authEmail").value, password:$("authPassword").value });
+    if (error) setStatus("authStatus", error.message, "error");
+    else setStatus("authStatus", t("st_account_created"), "ok");
+  };
+  $("signout").onclick = async () => { await sb.auth.signOut(); location.reload(); };
+
+  // ---- nav ----
+  document.querySelectorAll("#nav button").forEach(b => b.onclick = () => switchView(b.dataset.view));
+  function switchView(v){
+    document.querySelectorAll("#nav button").forEach(b => b.classList.toggle("active", b.dataset.view===v));
+    show("invoicesView", v==="invoices");
+    show("settingsView", v==="settings");
+  }
+
+  // ---- invoices ----
+  function cell(row, field){
+    const td = document.createElement("td");
+    if (GSTART.has(field)) td.classList.add("gstart");
+    const v = row[field];
+    td.textContent = (v===null||v===undefined||v==="") ? "—" : v;
+    if (v===null||v===undefined||v==="") td.classList.add("muted");
+    if (FIELD_COLS.includes(field) && !row.error){
+      td.classList.add("edit"); td.contentEditable = "true";
+      td.dataset.field = field; td.dataset.orig = (v??"");
+      td.onfocus = () => { if (td.classList.contains("muted")){ td.textContent=""; td.classList.remove("muted"); } };
+      td.onkeydown = e => { if(e.key==="Enter"){ e.preventDefault(); td.blur(); } };
+      td.onblur = () => saveCell(row, td);
+    }
+    return td;
+  }
+  function docTypeCell(row){
+    const td = document.createElement("td");
+    if (row.error){ td.textContent="—"; td.classList.add("muted"); return td; }
+    const sel = document.createElement("select");
+    sel.className = "doctype";
+    const current = (row.document_type||"").toLowerCase();
+    const opts = DOC_TYPES.includes(current) ? DOC_TYPES : (current?[current,...DOC_TYPES]:["",...DOC_TYPES]);
+    opts.forEach(type => {
+      const o=document.createElement("option"); o.value=type;
+      o.textContent = type ? t("dt_"+type) || type : t("dt_blank");
+      sel.appendChild(o);
+    });
+    sel.value = current;
+    sel.dataset.type = current;
+    sel.onchange = async () => {
+      try {
+        const updated = await api("/api/rows/"+row.id, { method:"PATCH", json:{ document_type: sel.value || null } });
+        Object.assign(row, updated);
+        sel.dataset.type = (updated.document_type||"").toLowerCase();
+        setStatus("status", t("st_saved"), "ok");
+      } catch(e){ setStatus("status", t("st_save_failed", e.message), "error"); sel.value=current; }
+    };
+    td.appendChild(sel);
+    return td;
+  }
+  async function saveCell(row, td){
+    const field = td.dataset.field;
+    let val = td.textContent.trim();
+    if (val === td.dataset.orig || (val==="" && td.dataset.orig==="")) { if(val===""){td.textContent="—";td.classList.add("muted");} return; }
+    try {
+      const updated = await api("/api/rows/"+row.id, { method:"PATCH", json:{ [field]: val || null } });
+      Object.assign(row, updated);
+      td.dataset.orig = (updated[field]??"");
+      if (val==="") { td.textContent="—"; td.classList.add("muted"); }
+      setStatus("status", t("st_saved"), "ok");
+    } catch(e){ setStatus("status", t("st_save_failed", e.message), "error"); td.textContent = td.dataset.orig||"—"; }
+  }
+  // Pohoda IČO column: not extracted, so it's not in FIELD_COLS. The user
+  // either picks the vendor's or customer's already-extracted IČO with a
+  // button, since Pohoda needs the *target accounting unit's* IČO, which is
+  // one of the two parties on the invoice.
+  function pohodaIcoCell(row){
+    const td = document.createElement("td");
+    const val = document.createElement("span");
+    val.textContent = row.pohoda_ico || "—";
+    if (!row.pohoda_ico) val.classList.add("muted");
+    td.appendChild(val);
+    td.appendChild(document.createElement("br"));
+    const setIco = async (value, btn) => {
+      try {
+        const updated = await api("/api/rows/"+row.id, { method:"PATCH", json:{ pohoda_ico: value || null } });
+        Object.assign(row, updated);
+        val.textContent = row.pohoda_ico || "—";
+        val.classList.toggle("muted", !row.pohoda_ico);
+        setStatus("status", t("st_saved"), "ok");
+      } catch(e){ setStatus("status", t("st_save_failed", e.message), "error"); }
+    };
+    const mkBtn = (label, value) => {
+      const b = document.createElement("button");
+      b.className = "ghost";
+      b.style.cssText = "font-size:.68rem;padding:.08rem .35rem;margin-right:.25rem;";
+      b.textContent = label;
+      b.disabled = !value;
+      b.onclick = () => setIco(value);
+      return b;
+    };
+    td.appendChild(mkBtn(t("use_vendor_ico_btn"), row.ico));
+    td.appendChild(mkBtn(t("use_customer_ico_btn"), row.customer_ico));
+    return td;
+  }
+  // Toggle button flagging a row (invoice or bank statement) for review. The
+  // server is the source of truth for the new state, so the button reflects
+  // whatever it returns.
+  function reportButton(obj, path){
+    const b = document.createElement("button");
+    b.className = "report";
+    const paint = () => {
+      b.classList.toggle("on", !!obj.reported);
+      b.textContent = t(obj.reported ? "reported_btn" : "report_btn");
+      b.title = t(obj.reported ? "reported_title" : "report_title");
+    };
+    paint();
+    b.onclick = async () => {
+      b.disabled = true;
+      try {
+        const updated = await api(path+"/report", { method:"POST", json:{ reported: !obj.reported } });
+        Object.assign(obj, updated);
+        paint();
+        setStatus("status", t("st_saved"), "ok");
+      } catch(e){ setStatus("status", t("st_report_failed", e.message), "error"); }
+      b.disabled = false;
+    };
+    return b;
+  }
+  function renderRow(row){
+    const tr = document.createElement("tr");
+    if (row.error) tr.classList.add("failed");
+    const file = document.createElement("td"); file.textContent = row.filename||"(unknown)"; tr.appendChild(file);
+    if (row.error){
+      tr.appendChild(docTypeCell(row));
+      const msg = document.createElement("td"); msg.colSpan = FIELD_COLS.length; msg.textContent = row.error; tr.appendChild(msg);
+    } else {
+      FIELD_COLS.forEach(f => tr.appendChild(f==="document_type" ? docTypeCell(row) : cell(row, f)));
+      tr.appendChild(pohodaIcoCell(row));
+    }
+    const src = document.createElement("td"); src.className="src"; src.textContent = row.source + (row.sender_email? " ("+row.sender_email+")":""); src.title = src.textContent; tr.appendChild(src);
+    const act = document.createElement("td");
+    const del = document.createElement("button"); del.className="del"; del.textContent=t("del_btn");
+    del.onclick = async () => { if(!confirm(t("confirm_delete")))return; try{ await api("/api/rows/"+row.id,{method:"DELETE"}); rowsCache = rowsCache.filter(r=>r.id!==row.id); tr.remove(); }catch(e){ setStatus("status",e.message,"error"); } };
+    act.appendChild(reportButton(row, "/api/rows/"+row.id)); act.appendChild(del); tr.appendChild(act);
+    return tr;
+  }
+  function renderRows(rows){
+    const tb = $("rows"); tb.innerHTML="";
+    rows.forEach(r => tb.appendChild(renderRow(r)));
+  }
+  async function loadRows(){
+    try {
+      const rows = await api("/api/rows");
+      rowsCache = rows;
+      renderRows(rows);
+    } catch(e){ setStatus("status", t("st_load_failed", e.message), "error"); }
+  }
+  $("refreshBtn").onclick = () => { loadRows(); loadBankStatements(); };
+
+  // upload (one or many PDFs; each PDF may yield several invoice rows)
+  const drop=$("drop"), fileInput=$("fileInput");
+  drop.onclick = () => fileInput.click();
+  fileInput.onchange = e => { if(e.target.files.length) uploadFiles(e.target.files); fileInput.value=""; };
+  ["dragenter","dragover"].forEach(ev => drop.addEventListener(ev, e=>{e.preventDefault();drop.classList.add("hover");}));
+  ["dragleave","drop"].forEach(ev => drop.addEventListener(ev, e=>{e.preventDefault();drop.classList.remove("hover");}));
+  drop.addEventListener("drop", e => { if(e.dataTransfer.files.length) uploadFiles(e.dataTransfer.files); });
+  // Upload one PDF and consume the Server-Sent Events stream. Invoices arrive in
+  // one event; a bank statement streams its transactions in chunks, so the table
+  // fills in live. Returns a {added, issues} summary (added = documents shown).
+  async function uploadOne(file){
+    const fd = new FormData(); fd.append("file", file);
+    const resp = await fetch("/api/upload", { method:"POST", headers:{ "Authorization":"Bearer "+token }, body:fd });
+    if (!resp.ok){ let d; try{ d=await resp.json(); }catch(e){} const err=new Error(d?.detail || ("HTTP "+resp.status)); err.status=resp.status; throw err; }
+    const summary = { added:0, issues:0 };
+    const handle = (ev) => {
+      if (ev.type === "invoices"){
+        ev.rows.forEach(r => { rowsCache.push(r); $("rows").appendChild(renderRow(r)); summary.added++; if(r.error) summary.issues++; });
+      } else if (ev.type === "statement_started"){
+        const st = ev.row, i = bankCache.findIndex(s => s.id === st.id);
+        if (i >= 0) bankCache[i] = st; else bankCache.push(st);
+        upsertBankRow(st, true);   // expanded so transactions are visible as they stream
+        refreshBankView();
+        summary.added++; if (st.error) summary.issues++;
+        setStatus("status", t("st_bank_progress", (st.transactions||[]).length), "");
+      } else if (ev.type === "statement_progress"){
+        const st = bankCache.find(s => s.id === ev.id);
+        if (st){ st.transactions = ev.transactions; upsertBankRow(st, true); }
+        setStatus("status", t("st_bank_progress", (ev.transactions||[]).length), "");
+      } else if (ev.type === "warning" || ev.type === "error"){
+        if (ev.type === "error") summary.issues++;
+        setStatus("status", ev.message, "error");
+      }
+    };
+    const reader = resp.body.getReader(), dec = new TextDecoder();
+    let buf = "";
+    while(true){
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream:true });
+      let idx;
+      while((idx = buf.indexOf("\n\n")) >= 0){
+        const block = buf.slice(0, idx); buf = buf.slice(idx + 2);
+        const line = block.split("\n").find(l => l.startsWith("data:"));
+        if (line){ try { handle(JSON.parse(line.slice(5).trim())); } catch(e){} }
+      }
+    }
+    return summary;
+  }
+  async function uploadFiles(files){
+    const arr = Array.from(files);
+    let added=0, issues=0;
+    for (let i=0; i<arr.length; i++){
+      setStatus("status", t("st_parsing", arr[i].name, i+1, arr.length));
+      try {
+        const s = await uploadOne(arr[i]);
+        added += s.added; issues += s.issues;
+      } catch(e){ issues++; setStatus("status", t("st_failed_on", arr[i].name, e.message), "error"); }
+    }
+    setStatus("status", t("st_upload_done", arr.length, added, issues), issues?"error":"ok");
+  }
+
+  // read emails
+  $("readEmailsBtn").onclick = async () => {
+    let limit = parseInt($("emailLimit").value, 10);
+    if (!Number.isFinite(limit) || limit < 1) limit = cfg.email_batch_cap || 20;
+    setStatus("status", t("st_reading", limit));
+    $("readEmailsBtn").disabled = true;
+    try {
+      const res = await api("/api/emails/read", { method:"POST", json:{ limit } });
+      await loadRows();
+      setStatus("status", t("st_read_result", res.scanned, res.parsed, res.skipped), "ok");
+    } catch(e){ setStatus("status", t("st_read_failed", e.message), "error"); }
+    finally { $("readEmailsBtn").disabled = false; }
+  };
+
+  // export
+  // Server picks the actual filename (a single .xml, or a .zip when the rows
+  // span more than one Pohoda IČO) via Content-Disposition; `fallback` is only
+  // used if that header is somehow missing.
+  async function downloadExport(path, fallback){
+    const resp = await api(path);
+    const disp = resp.headers.get("content-disposition") || "";
+    const m = disp.match(/filename="([^"]+)"/);
+    const filename = m ? m[1] : fallback;
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href=url; a.download=filename; a.click();
+    URL.revokeObjectURL(url);
+  }
+  $("exportBtn").onclick = async () => {
+    try { await downloadExport("/api/export/pohoda.xml", "pohoda-invoices.xml"); }
+    catch(e){ setStatus("status", t("st_export_failed", e.message), "error"); }
+  };
+  $("exportBankBtn").onclick = async () => {
+    try { await downloadExport("/api/export/pohoda-bank.xml", "pohoda-bank.xml"); }
+    catch(e){ setStatus("status", t("st_export_failed", e.message), "error"); }
+  };
+
+  // ---- bank statements ----
+  // Show the table only when there are statements; otherwise the empty note.
+  function refreshBankView(){
+    const has = bankCache.length > 0;
+    show("bankTableWrap", has);
+    show("bankEmpty", !has);
+  }
+  function fmtNum(v){ return (v===null||v===undefined||v==="") ? "—" : v; }
+
+  // An editable cell that writes back into an object and PATCHes via `save`.
+  // `obj[field]` is the source of truth; `save()` is called on blur if changed.
+  function editCell(obj, field, save, extraClass){
+    const td = document.createElement("td");
+    if (extraClass) td.className = extraClass;
+    const v = obj[field];
+    const blank = (v===null||v===undefined||v==="");
+    td.textContent = blank ? "—" : v;
+    if (blank) td.classList.add("muted");
+    td.classList.add("edit"); td.contentEditable = "true";
+    td.dataset.orig = (v??"");
+    td.onfocus = () => { if (td.classList.contains("muted")){ td.textContent=""; td.classList.remove("muted"); } };
+    td.onkeydown = e => { if(e.key==="Enter"){ e.preventDefault(); td.blur(); } };
+    td.onblur = async () => {
+      const val = td.textContent.trim();
+      if (val === td.dataset.orig || (val==="" && td.dataset.orig==="")) { if(val===""){td.textContent="—";td.classList.add("muted");} return; }
+      obj[field] = val || null;
+      try {
+        await save();
+        td.dataset.orig = (obj[field]??"");
+        if (val==="") { td.textContent="—"; td.classList.add("muted"); }
+        setStatus("status", t("st_saved"), "ok");
+      } catch(e){ obj[field]=td.dataset.orig||null; td.textContent = td.dataset.orig||"—"; setStatus("status", t("st_save_failed", e.message), "error"); }
+    };
+    return td;
+  }
+  async function saveBankHeader(st){
+    const fields = {}; BANK_HEADER_COLS.forEach(f => fields[f] = st[f]);
+    const updated = await api("/api/bank-statements/"+st.id, { method:"PATCH", json:fields });
+    Object.assign(st, updated);
+  }
+  async function saveBankTxns(st){
+    const updated = await api("/api/bank-statements/"+st.id, { method:"PATCH", json:{ transactions: st.transactions } });
+    Object.assign(st, updated);
+  }
+  // Detail row: a full-width cell holding a sub-table of transactions.
+  function txnDetailRow(st, expanded){
+    const tr = document.createElement("tr"); tr.className = "txn-detail" + (expanded ? "" : " hidden");
+    const td = document.createElement("td"); td.colSpan = 11; td.style.padding = "0";
+    const wrap = document.createElement("div"); wrap.style.padding = ".4rem .6rem .8rem";
+    const tbl = document.createElement("table"); tbl.className = "subtable";
+    const thead = document.createElement("thead");
+    thead.innerHTML = "<tr>" + ["txn_date","txn_party","txn_party_acc","th_vs","txn_desc","txn_amount","txn_balance"]
+      .map(k => `<th>${t(k)}</th>`).join("") + "</tr>";
+    tbl.appendChild(thead);
+    const tb = document.createElement("tbody");
+    const txns = st.transactions || [];
+    if (!txns.length){
+      const r = document.createElement("tr"); const c=document.createElement("td");
+      c.colSpan = TXN_COLS.length; c.className="muted"; c.textContent = t("txn_none"); r.appendChild(c); tb.appendChild(r);
+    } else {
+      txns.forEach(txn => {
+        const r = document.createElement("tr");
+        TXN_COLS.forEach(f => {
+          let cls = "";
+          if (f === "amount") cls = String(txn[f]||"").trim().startsWith("-") ? "amt-neg" : "amt-pos";
+          else if (f === "counterparty_name" || f === "description") cls = "clamp";
+          r.appendChild(editCell(txn, f, () => saveBankTxns(st), cls));
+        });
+        tb.appendChild(r);
+      });
+    }
+    tbl.appendChild(tb); wrap.appendChild(tbl); td.appendChild(wrap); tr.appendChild(td);
+    return tr;
+  }
+  function bankParentRow(st, detail){
+    const tr = document.createElement("tr");
+    if (st.error) tr.classList.add("failed");
+    const toggle = document.createElement("td"); toggle.className="tgl";
+    const btn = document.createElement("button"); btn.className="tglbtn";
+    const setArrow = () => { btn.textContent = detail.classList.contains("hidden") ? "▸" : "▾"; };
+    setArrow();
+    btn.onclick = () => { detail.classList.toggle("hidden"); setArrow(); };
+    toggle.appendChild(btn); tr.appendChild(toggle);
+    const file = document.createElement("td"); file.textContent = st.filename||"(unknown)"; tr.appendChild(file);
+    if (st.error){
+      const msg=document.createElement("td"); msg.colSpan=7; msg.textContent=st.error; tr.appendChild(msg);
+    } else {
+      tr.appendChild(editCell(st, "account_number", () => saveBankHeader(st)));
+      const per = document.createElement("td");
+      per.textContent = (fmtNum(st.period_start)) + " – " + (fmtNum(st.period_end)); tr.appendChild(per);
+      tr.appendChild(editCell(st, "currency", () => saveBankHeader(st)));
+      tr.appendChild(editCell(st, "opening_balance", () => saveBankHeader(st)));
+      tr.appendChild(editCell(st, "closing_balance", () => saveBankHeader(st)));
+      const cnt=document.createElement("td"); cnt.textContent=(st.transactions||[]).length; tr.appendChild(cnt);
+      tr.appendChild(editCell(st, "pohoda_ico", () => saveBankHeader(st)));
+    }
+    const src = document.createElement("td"); src.className="src"; src.textContent = st.source + (st.sender_email? " ("+st.sender_email+")":""); tr.appendChild(src);
+    const act = document.createElement("td");
+    const del = document.createElement("button"); del.className="del"; del.textContent=t("del_btn");
+    del.onclick = async () => { if(!confirm(t("confirm_delete_bank")))return; try{ await api("/api/bank-statements/"+st.id,{method:"DELETE"}); bankCache=bankCache.filter(s=>s.id!==st.id); tr.remove(); detail.remove(); refreshBankView(); }catch(e){ setStatus("status",e.message,"error"); } };
+    act.appendChild(reportButton(st, "/api/bank-statements/"+st.id)); act.appendChild(del); tr.appendChild(act);
+    return tr;
+  }
+  function appendBankRow(st, expanded){
+    const tb = $("bankRows");
+    const detail = txnDetailRow(st, expanded);
+    const parent = bankParentRow(st, detail);
+    parent.id = "bank-"+st.id; detail.id = "bankdet-"+st.id;
+    tb.appendChild(parent);
+    tb.appendChild(detail);
+  }
+  // Replace a statement's rows in place (for live streaming updates), or append
+  // if it isn't on the page yet.
+  function upsertBankRow(st, expanded){
+    const oldP = document.getElementById("bank-"+st.id), oldD = document.getElementById("bankdet-"+st.id);
+    if (!oldP || !oldD){ appendBankRow(st, expanded); return; }
+    const detail = txnDetailRow(st, expanded);
+    const parent = bankParentRow(st, detail);
+    parent.id = "bank-"+st.id; detail.id = "bankdet-"+st.id;
+    oldP.replaceWith(parent); oldD.replaceWith(detail);
+  }
+  function renderBankStatements(list){
+    const tb = $("bankRows"); tb.innerHTML="";
+    list.forEach(st => appendBankRow(st));
+    refreshBankView();
+  }
+  async function loadBankStatements(){
+    try { bankCache = await api("/api/bank-statements"); renderBankStatements(bankCache); }
+    catch(e){ /* a 403 (not approved) is handled on the invoices load */ }
+  }
+
+  // ---- settings ----
+  async function loadSettings(){
+    try {
+      const s = await api("/api/email-settings");
+      if (s.provider) $("provider").value = s.provider;
+      $("emailAddress").value = s.email_address || "";
+      $("autoPoll").checked = !!s.auto_poll;
+      $("pwSet").textContent = s.has_password ? t("pw_saved") : "";
+    } catch(e){ /* ignore */ }
+  }
+  $("saveSettingsBtn").onclick = async () => {
+    setStatus("settingsStatus", t("st_settings_saving"));
+    try {
+      await api("/api/email-settings", { method:"PUT", json:{
+        provider:$("provider").value,
+        email_address:$("emailAddress").value,
+        password:$("emailPassword").value || undefined,
+        auto_poll:$("autoPoll").checked,
+      }});
+      $("emailPassword").value="";
+      await loadSettings();
+      setStatus("settingsStatus", t("st_settings_saved"), "ok");
+    } catch(e){ setStatus("settingsStatus", t("st_settings_save_failed", e.message), "error"); }
+  };
+  </script>
+</body>
+</html>

@@ -1,0 +1,39 @@
+# Web framework
+fastapi==0.136.3
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
+
+# PDF text extraction (no OCR)
+PyMuPDF==1.27.2.3
+
+# Per-page text-vs-scan classification, so only real scans pay for OCR
+pdf-inspector==1.14.1
+
+# LLM abstraction — provider-switchable (anthropic | openai | ollama)
+langchain-core==0.3.29
+langchain-anthropic==0.3.1
+langchain-openai==0.2.14
+langchain-google-genai==2.0.9
+langchain-ollama==0.2.2
+
+# Anthropic SDK, used directly (not via LangChain) for the one-shot
+# native-PDF bank-statement call in app/extract.py
+anthropic==0.118.0
+
+# Data / models
+pydantic==2.10.4
+pydantic-settings==2.7.1
+
+# Supabase access is over its REST/Auth HTTP API (PostgREST + GoTrue) via httpx
+# — the SDK is intentionally not used, so the new sb_publishable_/sb_secret_
+# key format works.
+httpx==0.28.1
+
+# Encrypt stored email credentials at rest
+cryptography==44.0.0
+
+# Config
+python-dotenv==1.0.1
+
+# Tests + evals
+pytest==8.3.4

@@ -1,0 +1,29 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Secrets / local env (NEVER commit real keys)
+.env
+.env.local
+.env.*.local
+
+# Logs & local runtime artifacts
+*.log
+server.log
+*.db
+*.sqlite
+*.sqlite3
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+
+# Local sample documents (real bank statements / personal data)
+test_data/
+tests/fixtures/real_documents/*
+!tests/fixtures/real_documents/README.md

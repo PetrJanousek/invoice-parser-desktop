@@ -1,0 +1,21 @@
+{
+  "name": "en_acme",
+  "description": "Simple English invoice (from sample_invoice.pdf)",
+  "text": "Acme Office Supplies Inc.\nINVOICE\nInvoice Number: INV-2026-0042\nInvoice Date: 2026-05-30\nDue Date: 2026-06-29\nBill To: Petr Janousek\nDescription                 Qty     Unit Price     Amount\nPrinter paper (case)         5        12.00         60.00\nBallpoint pens (box)         3        8.50          25.50\nUSB-C cables                 4        9.00          36.00\nSubtotal: 121.50\nTax (10%): 12.15\nTotal: USD 133.65",
+  "expected": {
+    "document_type": "invoice",
+    "vendor": "Acme Office Supplies Inc.",
+    "ico": null,
+    "customer": "Petr Janousek",
+    "customer_ico": null,
+    "invoice_number": "INV-2026-0042",
+    "variable_symbol": null,
+    "invoice_date": "2026-05-30",
+    "due_date": "2026-06-29",
+    "currency": ["USD", "$"],
+    "subtotal": "121.50",
+    "tax": "12.15",
+    "total": "133.65",
+    "bank_account": null
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "name": "cz_novak",
+  "description": "Czech invoice with IČO / VS / bank account (from cz_invoice.pdf). Two IČO present — vendor is the Dodavatel.",
+  "text": "FAKTURA - DANOVY DOKLAD\nDodavatel: Stavebni firma Novak s.r.o.\nTrida Miru 12, 130 00 Praha 3\nICO: 27182734\nDIC: CZ27182734\nOdberatel: Ucetni Kancelar Svoboda s.r.o.\nICO: 49710001\nCislo faktury: 2026-0117\nDatum vystaveni: 1.6.2026\nDatum splatnosti: 15.6.2026\nBankovni ucet: 1234567890/0800\nIBAN: CZ65 0800 0000 0012 3456 7890\nVariabilni symbol: 20260117\nPolozka                          Mnozstvi   Cena\nZednicke prace                   1          50 000 Kc\nCelkem bez DPH:                  50 000 Kc\nDPH 21%:                         10 500 Kc\nCelkem k uhrade:                 60 500 Kc",
+  "expected": {
+    "document_type": "invoice",
+    "vendor": ["Stavebni firma Novak s.r.o.", "Stavební firma Novák s.r.o."],
+    "ico": "27182734",
+    "customer": ["Ucetni Kancelar Svoboda s.r.o.", "Účetní kancelář Svoboda s.r.o."],
+    "customer_ico": "49710001",
+    "invoice_number": "2026-0117",
+    "variable_symbol": "20260117",
+    "invoice_date": "1.6.2026",
+    "due_date": "15.6.2026",
+    "currency": ["Kc", "Kč", "CZK"],
+    "subtotal": "50000",
+    "tax": "10500",
+    "total": "60500",
+    "bank_account": "1234567890/0800"
+  }
+}

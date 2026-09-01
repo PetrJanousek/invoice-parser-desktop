@@ -1,0 +1,21 @@
+{
+  "name": "eur_simple",
+  "description": "Simple EUR invoice, dd/mm/yyyy dates, comma decimals",
+  "text": "TechParts GmbH\nRechnung / Invoice\nInvoice No: 2026/558\nDate: 14/03/2026\nPayment due: 28/03/2026\nIBAN: DE89 3704 0044 0532 0130 00\nItem                 Amount\nServer rack            820,00\nNet: 820,00\nVAT 19%: 155,80\nTotal due: EUR 975,80",
+  "expected": {
+    "document_type": "invoice",
+    "vendor": "TechParts GmbH",
+    "ico": null,
+    "customer": null,
+    "customer_ico": null,
+    "invoice_number": "2026/558",
+    "variable_symbol": null,
+    "invoice_date": "14/03/2026",
+    "due_date": "28/03/2026",
+    "currency": ["EUR", "€"],
+    "subtotal": "820.00",
+    "tax": "155.80",
+    "total": "975.80",
+    "bank_account": "DE89 3704 0044 0532 0130 00"
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "name": "minimal",
+  "description": "Minimal invoice — few fields present, most should be null",
+  "text": "Jane Freelance Design\nInvoice #7\nTotal: $500",
+  "expected": {
+    "document_type": "invoice",
+    "vendor": "Jane Freelance Design",
+    "ico": null,
+    "customer": null,
+    "customer_ico": null,
+    "invoice_number": ["7", "#7"],
+    "variable_symbol": null,
+    "invoice_date": null,
+    "due_date": null,
+    "currency": ["USD", "$"],
+    "subtotal": null,
+    "tax": null,
+    "total": "500",
+    "bank_account": null
+  }
+}
