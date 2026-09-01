@@ -91,6 +91,23 @@ automatically on the `windows-latest` job and uploads it as the
 Windows user: they run it once to install, then launch "Invoice Parser" from
 the Start Menu or its shortcut like any other app.
 
+### Cutting a release
+
+The app's version lives in the `VERSION` file at the repo root (a bare
+`X.Y.Z`, no `v` prefix) — it's baked into the build (macOS `Info.plist`,
+the Windows installer) and is what the in-app update check compares
+against. To publish a new release:
+
+1. Bump `VERSION` (e.g. `1.0.0` → `1.1.0`) and commit it.
+2. Tag that commit `v1.1.0` (matching `VERSION` exactly, `v` prefix on the
+   tag only) and push the tag: `git tag v1.1.0 && git push origin v1.1.0`.
+
+Pushing a `v*.*.*` tag triggers `.github/workflows/desktop-build.yml`'s
+`release` job, which re-checks the tag matches `VERSION` (fails the build
+otherwise, so a forgotten version bump can't ship), then builds both
+platforms and publishes a GitHub Release with `InvoiceParserSetup.exe` and
+`Invoice Parser-mac.zip` attached — the assets the update check downloads.
+
 ## Data storage
 
 Local data lives under the OS app-data directory (via `platformdirs`):

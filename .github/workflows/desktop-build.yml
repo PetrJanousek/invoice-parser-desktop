@@ -3,6 +3,7 @@ name: Desktop build
 on:
   push:
     branches: [main]
+    tags: ["v*.*.*"]
   workflow_dispatch: {}
 
 jobs:
@@ -37,11 +38,18 @@ jobs:
           name: ${{ matrix.artifact-name }}
           path: dist/
 
+      - name: Read app version
+        if: matrix.os == 'windows-latest'
+        id: appversion
+        shell: bash
+        run: echo "version=$(cat VERSION)" >> "$GITHUB_OUTPUT"
+
       - name: Build Windows installer
         if: matrix.os == 'windows-latest'
         uses: Minionguyjpro/Inno-Setup-Action@v1.2.2
         with:
           path: installer.iss
+          options: /DMyAppVersion=${{ steps.appversion.outputs.version }}
 
       - name: Upload Windows installer
         if: matrix.os == 'windows-latest'
@@ -49,3 +57,51 @@ jobs:
         with:
           name: invoice-parser-windows-installer
           path: installer_output/InvoiceParserSetup.exe
+
+      - name: Zip macOS app
+        if: matrix.os == 'macos-latest'
+        # ditto (not zip) preserves the .app bundle structure/metadata correctly.
+        run: ditto -c -k --sequesterRsrc --keepParent "dist/Invoice Parser.app" "Invoice Parser-mac.zip"
+
+      - name: Upload macOS app zip
+        if: matrix.os == 'macos-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: invoice-parser-macos-zip
+          path: Invoice Parser-mac.zip
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check tag matches VERSION file
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          file="$(cat VERSION)"
+          if [ "$tag" != "$file" ]; then
+            echo "Tag v$tag does not match VERSION file ($file) — bump VERSION and retag." >&2
+            exit 1
+          fi
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: invoice-parser-windows-installer
+          path: release-assets
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: invoice-parser-macos-zip
+          path: release-assets
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            release-assets/InvoiceParserSetup.exe
+            release-assets/Invoice Parser-mac.zip
