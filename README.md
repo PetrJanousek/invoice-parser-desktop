@@ -106,7 +106,7 @@ Pushing a `v*.*.*` tag triggers `.github/workflows/desktop-build.yml`'s
 `release` job, which re-checks the tag matches `VERSION` (fails the build
 otherwise, so a forgotten version bump can't ship), then builds both
 platforms and publishes a GitHub Release with `InvoiceParserSetup.exe` and
-`Invoice Parser-mac.zip` attached — the assets the update check downloads.
+`Invoice-Parser-mac.zip` attached — the assets the update check downloads.
 
 ## Data storage
 
