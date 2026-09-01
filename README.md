@@ -65,6 +65,26 @@ This is a **onedir** build (a folder, not a single file):
 The GitHub Actions workflow (`.github/workflows/desktop-build.yml`) builds both
 platforms on push to `main` and on manual dispatch, then uploads the artifacts.
 
+### Windows installer
+
+The raw onedir folder above still needs to be unzipped and run in place. For a
+proper "download, double-click, done" installer, `installer.iss` (an
+[Inno Setup](https://jrsoftware.org/isinfo.php) script) wraps that build into a
+single `InvoiceParserSetup.exe`: it installs to Program Files, adds a Start
+Menu shortcut (and an optional Desktop shortcut), and registers a normal
+Windows uninstaller. Build it (on Windows, after the PyInstaller step above)
+with Inno Setup's compiler:
+
+```
+iscc installer.iss
+```
+
+producing `installer_output/InvoiceParserSetup.exe`. CI builds this
+automatically on the `windows-latest` job and uploads it as the
+`invoice-parser-windows-installer` artifact — that's the file to hand to a
+Windows user: they run it once to install, then launch "Invoice Parser" from
+the Start Menu or its shortcut like any other app.
+
 ## Data storage
 
 Local data lives under the OS app-data directory (via `platformdirs`):

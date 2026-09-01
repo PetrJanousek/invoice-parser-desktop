@@ -10,6 +10,9 @@ __pycache__/
 build/
 dist/
 
+# Inno Setup installer output (installer.iss stays tracked)
+installer_output/
+
 # Secrets / local env (NEVER commit real keys)
 .env
 .env.local
