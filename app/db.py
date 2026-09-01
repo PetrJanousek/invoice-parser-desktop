@@ -1,15 +1,19 @@
-"""Supabase data access via the PostgREST HTTP API (httpx).
+"""Local SQLite data access for the single-user desktop app.
 
-We talk to Supabase's REST endpoint directly rather than through the Python SDK
-so the new `sb_publishable_` / `sb_secret_` API key format works. The server
-authenticates with the service key and **always** filters by ``user_id`` so
-tenants only ever touch their own rows; Row-Level Security in
-supabase/schema.sql is a second line of defense.
+Every public function still accepts the same arguments as the old Supabase
+layer (including a leading ``user_id``) so ``app.main`` does not need to
+change in this step. ``user_id`` is ignored: there is one local user and no
+tenancy filter.
 """
-from functools import lru_cache
-from typing import Optional
+from __future__ import annotations
 
-import httpx
+import datetime
+import json
+import sqlite3
+import uuid
+from contextlib import contextmanager
+from pathlib import Path
+from typing import Any, Iterator, Optional
 
 from .config import settings
 
@@ -17,121 +21,365 @@ INVOICES = "invoices"
 BANK_STATEMENTS = "bank_statements"
 REPORTED_DOCUMENTS = "reported_documents"
 EMAIL_SETTINGS = "email_settings"
-ALLOWED_EMAILS = "allowed_emails"
 
-UPLOADED_FILES_BUCKET = "uploaded-files"
+# Single local email-settings row.
+EMAIL_SETTINGS_ID = 1
+
+INVOICE_COLUMNS = (
+    "id",
+    "filename",
+    "source",
+    "sender_email",
+    "document_type",
+    "vendor",
+    "ico",
+    "customer",
+    "customer_ico",
+    "invoice_number",
+    "variable_symbol",
+    "invoice_date",
+    "due_date",
+    "currency",
+    "subtotal",
+    "tax",
+    "total",
+    "bank_account",
+    "error",
+    "pohoda_ico",
+    "file_path",
+    "reported",
+    "reported_at",
+    "created_at",
+    "updated_at",
+)
+
+BANK_STATEMENT_COLUMNS = (
+    "id",
+    "filename",
+    "source",
+    "sender_email",
+    "account_number",
+    "statement_number",
+    "currency",
+    "period_start",
+    "period_end",
+    "opening_balance",
+    "closing_balance",
+    "transactions",
+    "error",
+    "pohoda_ico",
+    "file_path",
+    "reported",
+    "reported_at",
+    "matched_parser",
+    "created_at",
+    "updated_at",
+)
+
+REPORTED_DOCUMENT_COLUMNS = (
+    "id",
+    "kind",
+    "original_row_id",
+    "file_path",
+    "extracted_data",
+    "reported_at",
+    "created_at",
+)
+
+EMAIL_SETTINGS_COLUMNS = (
+    "id",
+    "provider",
+    "email_address",
+    "imap_password_encrypted",
+    "auto_poll",
+    "last_polled_at",
+    "created_at",
+    "updated_at",
+)
+
+_COLUMNS = {
+    INVOICES: INVOICE_COLUMNS,
+    BANK_STATEMENTS: BANK_STATEMENT_COLUMNS,
+    REPORTED_DOCUMENTS: REPORTED_DOCUMENT_COLUMNS,
+    EMAIL_SETTINGS: EMAIL_SETTINGS_COLUMNS,
+}
+
+_BOOL_COLUMNS = frozenset({"reported", "auto_poll"})
+_JSON_COLUMNS = {
+    "transactions": list,
+    "extracted_data": dict,
+}
+
+_SCHEMA = f"""
+CREATE TABLE IF NOT EXISTS {INVOICES} (
+    id TEXT PRIMARY KEY,
+    filename TEXT,
+    source TEXT,
+    sender_email TEXT,
+    document_type TEXT,
+    vendor TEXT,
+    ico TEXT,
+    customer TEXT,
+    customer_ico TEXT,
+    invoice_number TEXT,
+    variable_symbol TEXT,
+    invoice_date TEXT,
+    due_date TEXT,
+    currency TEXT,
+    subtotal TEXT,
+    tax TEXT,
+    total TEXT,
+    bank_account TEXT,
+    error TEXT,
+    pohoda_ico TEXT,
+    file_path TEXT,
+    reported INTEGER NOT NULL DEFAULT 0,
+    reported_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS {BANK_STATEMENTS} (
+    id TEXT PRIMARY KEY,
+    filename TEXT,
+    source TEXT,
+    sender_email TEXT,
+    account_number TEXT,
+    statement_number TEXT,
+    currency TEXT,
+    period_start TEXT,
+    period_end TEXT,
+    opening_balance TEXT,
+    closing_balance TEXT,
+    transactions TEXT NOT NULL DEFAULT '[]',
+    error TEXT,
+    pohoda_ico TEXT,
+    file_path TEXT,
+    reported INTEGER NOT NULL DEFAULT 0,
+    reported_at TEXT,
+    matched_parser TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS {REPORTED_DOCUMENTS} (
+    id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    original_row_id TEXT NOT NULL,
+    file_path TEXT,
+    extracted_data TEXT NOT NULL DEFAULT '{{}}',
+    reported_at TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS {EMAIL_SETTINGS} (
+    id INTEGER PRIMARY KEY,
+    provider TEXT,
+    email_address TEXT,
+    imap_password_encrypted TEXT,
+    auto_poll INTEGER NOT NULL DEFAULT 0,
+    last_polled_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT
+);
+"""
 
 
-class SupabaseNotConfigured(RuntimeError):
-    """Raised when DB access is attempted before real Supabase creds are set."""
+def _now_iso() -> str:
+    return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
-class SupabaseError(RuntimeError):
-    """A non-2xx response from Supabase."""
+def _db_path() -> Path:
+    return settings.data_dir / "invoice-parser.db"
 
 
-@lru_cache
-def _client() -> httpx.Client:
-    if not settings.supabase_configured:
-        raise SupabaseNotConfigured(
-            "Supabase is not configured. Create a project, run "
-            "supabase/schema.sql, and fill SUPABASE_URL / SUPABASE_SERVICE_KEY "
-            "/ SUPABASE_ANON_KEY in .env (see README)."
+def _files_dir() -> Path:
+    path = settings.data_dir / "files"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def resolve_source_file(path: str) -> Path:
+    """Absolute path of a stored PDF.
+
+    Rows keep a relative ``file_path`` such as ``{row_id}.pdf``. The file
+    lives under ``settings.data_dir / "files"``.
+    """
+    given = Path(path)
+    if given.is_absolute():
+        return given
+    return _files_dir() / given.name
+
+
+def _ensure_schema(conn: sqlite3.Connection) -> None:
+    conn.executescript(_SCHEMA)
+
+
+@contextmanager
+def _connect() -> Iterator[sqlite3.Connection]:
+    settings.data_dir.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(_db_path()), check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA foreign_keys=ON")
+        _ensure_schema(conn)
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def _encode(column: str, value: Any) -> Any:
+    if column in _BOOL_COLUMNS:
+        if value is None:
+            return 0
+        return 1 if value else 0
+    if column in _JSON_COLUMNS:
+        if value is None:
+            return json.dumps(_JSON_COLUMNS[column]())
+        if isinstance(value, (dict, list)):
+            return json.dumps(value)
+        return value
+    return value
+
+
+def _decode_row(row: sqlite3.Row) -> dict:
+    out = dict(row)
+    for column in _BOOL_COLUMNS:
+        if column in out and out[column] is not None:
+            out[column] = bool(out[column])
+    for column, factory in _JSON_COLUMNS.items():
+        if column not in out:
+            continue
+        raw = out[column]
+        if raw is None:
+            out[column] = factory()
+            continue
+        if isinstance(raw, (dict, list)):
+            continue
+        try:
+            parsed = json.loads(raw)
+        except (TypeError, json.JSONDecodeError):
+            out[column] = factory()
+            continue
+        out[column] = parsed if isinstance(parsed, (dict, list)) else factory()
+    return out
+
+
+def _pick(row: dict, columns: tuple[str, ...]) -> dict:
+    return {k: row[k] for k in columns if k in row}
+
+
+def _insert(table: str, payload: dict) -> dict:
+    columns = tuple(payload.keys())
+    placeholders = ", ".join("?" for _ in columns)
+    sql = f"INSERT INTO {table} ({', '.join(columns)}) VALUES ({placeholders})"
+    values = [_encode(c, payload[c]) for c in columns]
+    with _connect() as conn:
+        conn.execute(sql, values)
+        fetched = conn.execute(
+            f"SELECT * FROM {table} WHERE id = ?", (payload["id"],)
+        ).fetchone()
+    return _decode_row(fetched)
+
+
+def _get_by_id(table: str, row_id: Any) -> Optional[dict]:
+    with _connect() as conn:
+        fetched = conn.execute(
+            f"SELECT * FROM {table} WHERE id = ?", (row_id,)
+        ).fetchone()
+    return _decode_row(fetched) if fetched else None
+
+
+def _update(table: str, row_id: str, fields: dict) -> Optional[dict]:
+    allowed = _COLUMNS[table]
+    payload = _pick(fields, allowed)
+    payload.pop("id", None)
+    if not payload:
+        return _get_by_id(table, row_id)
+    assignments = ", ".join(f"{c} = ?" for c in payload)
+    values = [_encode(c, payload[c]) for c in payload]
+    values.append(row_id)
+    with _connect() as conn:
+        cur = conn.execute(
+            f"UPDATE {table} SET {assignments} WHERE id = ?", values
         )
-    return httpx.Client(
-        base_url=settings.supabase_url.rstrip("/") + "/rest/v1",
-        headers={
-            "apikey": settings.supabase_service_key,
-            "Authorization": f"Bearer {settings.supabase_service_key}",
-        },
-        timeout=30.0,
-    )
+        if cur.rowcount == 0:
+            return None
+        fetched = conn.execute(
+            f"SELECT * FROM {table} WHERE id = ?", (row_id,)
+        ).fetchone()
+    return _decode_row(fetched) if fetched else None
 
 
-def _rows(resp: httpx.Response) -> list[dict]:
-    if resp.status_code >= 300:
-        raise SupabaseError(f"Supabase {resp.status_code}: {resp.text[:300]}")
-    return resp.json() if resp.content else []
+def _delete(table: str, row_id: str) -> Optional[dict]:
+    with _connect() as conn:
+        fetched = conn.execute(
+            f"SELECT * FROM {table} WHERE id = ?", (row_id,)
+        ).fetchone()
+        if fetched is None:
+            return None
+        conn.execute(f"DELETE FROM {table} WHERE id = ?", (row_id,))
+    return _decode_row(fetched)
+
+
+def _list_by_created_at(table: str) -> list[dict]:
+    with _connect() as conn:
+        rows = conn.execute(
+            f"SELECT * FROM {table} ORDER BY created_at ASC"
+        ).fetchall()
+    return [_decode_row(r) for r in rows]
 
 
 # --- Storage: original uploaded PDFs ---------------------------------------
 
-@lru_cache
-def _storage_client() -> httpx.Client:
-    if not settings.supabase_configured:
-        raise SupabaseNotConfigured(
-            "Supabase is not configured. Create a project, run "
-            "supabase/schema.sql, and fill SUPABASE_URL / SUPABASE_SERVICE_KEY "
-            "/ SUPABASE_ANON_KEY in .env (see README)."
-        )
-    return httpx.Client(
-        base_url=settings.supabase_url.rstrip("/") + "/storage/v1",
-        headers={
-            "apikey": settings.supabase_service_key,
-            "Authorization": f"Bearer {settings.supabase_service_key}",
-        },
-        timeout=60.0,
-    )
-
-
 def upload_source_file(user_id: str, row_id: str, pdf_bytes: bytes) -> str:
-    """Store an uploaded PDF and return its object path.
+    """Store an uploaded PDF and return its relative path.
 
-    The path is ``{user_id}/{row_id}.pdf`` so the storage policy in
-    supabase/migrations/006_reported_and_source_files.sql can enforce the same
-    private-per-owner rule the tables use. Re-uploading the same row's file
-    overwrites it (x-upsert) rather than failing.
+    The path is ``{row_id}.pdf`` under ``settings.data_dir / "files"``.
+    Re-uploading the same row overwrites the file.
     """
-    path = f"{user_id}/{row_id}.pdf"
-    resp = _storage_client().post(
-        f"/object/{UPLOADED_FILES_BUCKET}/{path}",
-        content=pdf_bytes,
-        headers={"Content-Type": "application/pdf", "x-upsert": "true"},
-    )
-    if resp.status_code >= 300:
-        raise SupabaseError(f"Supabase {resp.status_code}: {resp.text[:300]}")
-    return path
+    del user_id
+    rel = f"{row_id}.pdf"
+    dest = _files_dir() / rel
+    dest.write_bytes(pdf_bytes)
+    return rel
 
 
 def delete_source_file(path: str) -> None:
-    """Remove an uploaded PDF from Storage. A missing object is not an error."""
-    resp = _storage_client().delete(f"/object/{UPLOADED_FILES_BUCKET}/{path}")
-    if resp.status_code >= 300 and resp.status_code != 404:
-        raise SupabaseError(f"Supabase {resp.status_code}: {resp.text[:300]}")
+    """Remove an uploaded PDF. A missing file is not an error."""
+    if not path:
+        return
+    dest = resolve_source_file(path)
+    try:
+        dest.unlink()
+    except FileNotFoundError:
+        return
 
 
 # --- Invoices --------------------------------------------------------------
 
 def list_invoices(user_id: str) -> list[dict]:
-    resp = _client().get(
-        f"/{INVOICES}",
-        params={
-            "user_id": f"eq.{user_id}",
-            "select": "*",
-            "order": "created_at.asc",
-        },
-    )
-    return _rows(resp)
+    del user_id
+    return _list_by_created_at(INVOICES)
 
 
 def insert_invoice(user_id: str, row: dict) -> dict:
-    payload = dict(row)
-    payload["user_id"] = user_id
-    resp = _client().post(
-        f"/{INVOICES}", json=payload, headers={"Prefer": "return=representation"}
-    )
-    return _rows(resp)[0]
+    del user_id
+    payload = _pick(row, INVOICE_COLUMNS)
+    payload.setdefault("id", str(uuid.uuid4()))
+    payload.setdefault("created_at", _now_iso())
+    payload.setdefault("reported", False)
+    return _insert(INVOICES, payload)
 
 
 def update_invoice(user_id: str, invoice_id: str, fields: dict) -> Optional[dict]:
-    resp = _client().patch(
-        f"/{INVOICES}",
-        params={"id": f"eq.{invoice_id}", "user_id": f"eq.{user_id}"},
-        json=fields,
-        headers={"Prefer": "return=representation"},
-    )
-    rows = _rows(resp)
-    return rows[0] if rows else None
+    del user_id
+    return _update(INVOICES, invoice_id, fields)
 
 
 def delete_invoice(user_id: str, invoice_id: str) -> Optional[dict]:
@@ -140,62 +388,38 @@ def delete_invoice(user_id: str, invoice_id: str) -> Optional[dict]:
     The deleted row is returned so callers can clean up its source PDF without
     a second read: by the time we know the delete happened, the row is gone.
     """
-    resp = _client().delete(
-        f"/{INVOICES}",
-        params={"id": f"eq.{invoice_id}", "user_id": f"eq.{user_id}"},
-        headers={"Prefer": "return=representation"},
-    )
-    rows = _rows(resp)
-    return rows[0] if rows else None
+    del user_id
+    return _delete(INVOICES, invoice_id)
 
 
 # --- Bank statements -------------------------------------------------------
 
 def list_bank_statements(user_id: str) -> list[dict]:
-    resp = _client().get(
-        f"/{BANK_STATEMENTS}",
-        params={
-            "user_id": f"eq.{user_id}",
-            "select": "*",
-            "order": "created_at.asc",
-        },
-    )
-    return _rows(resp)
+    del user_id
+    return _list_by_created_at(BANK_STATEMENTS)
 
 
 def insert_bank_statement(user_id: str, row: dict) -> dict:
-    payload = dict(row)
-    payload["user_id"] = user_id
-    resp = _client().post(
-        f"/{BANK_STATEMENTS}",
-        json=payload,
-        headers={"Prefer": "return=representation"},
-    )
-    return _rows(resp)[0]
+    del user_id
+    payload = _pick(row, BANK_STATEMENT_COLUMNS)
+    payload.setdefault("id", str(uuid.uuid4()))
+    payload.setdefault("created_at", _now_iso())
+    payload.setdefault("reported", False)
+    payload.setdefault("transactions", [])
+    return _insert(BANK_STATEMENTS, payload)
 
 
 def update_bank_statement(
     user_id: str, statement_id: str, fields: dict
 ) -> Optional[dict]:
-    resp = _client().patch(
-        f"/{BANK_STATEMENTS}",
-        params={"id": f"eq.{statement_id}", "user_id": f"eq.{user_id}"},
-        json=fields,
-        headers={"Prefer": "return=representation"},
-    )
-    rows = _rows(resp)
-    return rows[0] if rows else None
+    del user_id
+    return _update(BANK_STATEMENTS, statement_id, fields)
 
 
 def delete_bank_statement(user_id: str, statement_id: str) -> Optional[dict]:
     """Delete a statement and return the row as it was, or None if there was none."""
-    resp = _client().delete(
-        f"/{BANK_STATEMENTS}",
-        params={"id": f"eq.{statement_id}", "user_id": f"eq.{user_id}"},
-        headers={"Prefer": "return=representation"},
-    )
-    rows = _rows(resp)
-    return rows[0] if rows else None
+    del user_id
+    return _delete(BANK_STATEMENTS, statement_id)
 
 
 # --- Reported documents ----------------------------------------------------
@@ -208,117 +432,80 @@ def insert_reported_document(
     extracted_data: dict,
 ) -> dict:
     """Append a permanent snapshot of a row that was just reported."""
-    resp = _client().post(
-        f"/{REPORTED_DOCUMENTS}",
-        json={
-            "user_id": user_id,
-            "kind": kind,
-            "original_row_id": original_row_id,
-            "file_path": file_path,
-            "extracted_data": extracted_data,
-        },
-        headers={"Prefer": "return=representation"},
-    )
-    return _rows(resp)[0]
+    del user_id
+    now = _now_iso()
+    payload = {
+        "id": str(uuid.uuid4()),
+        "kind": kind,
+        "original_row_id": original_row_id,
+        "file_path": file_path,
+        "extracted_data": extracted_data if extracted_data is not None else {},
+        "reported_at": now,
+        "created_at": now,
+    }
+    return _insert(REPORTED_DOCUMENTS, payload)
 
 
 def file_path_in_use(
     user_id: str, file_path: str, exclude_id: Optional[str] = None
 ) -> bool:
-    """True while anything still needs the Storage object at ``file_path``.
+    """True while anything still needs the file at ``file_path``.
 
     A single PDF can back several rows (a multi-invoice upload) and is kept
     forever once a snapshot in ``reported_documents`` points at it, so deleting
     one row may not free the file. ``exclude_id`` skips the row being deleted,
     whose own reference no longer counts.
     """
+    del user_id
     if not file_path:
         return False
-    for table in (REPORTED_DOCUMENTS, INVOICES, BANK_STATEMENTS):
-        params = {
-            "user_id": f"eq.{user_id}",
-            "file_path": f"eq.{file_path}",
-            "select": "id",
-            "limit": 1,
-        }
-        if exclude_id and table != REPORTED_DOCUMENTS:
-            params["id"] = f"neq.{exclude_id}"
-        if _rows(_client().get(f"/{table}", params=params)):
-            return True
+    with _connect() as conn:
+        for table in (REPORTED_DOCUMENTS, INVOICES, BANK_STATEMENTS):
+            sql = f"SELECT id FROM {table} WHERE file_path = ?"
+            params: list[Any] = [file_path]
+            if exclude_id and table != REPORTED_DOCUMENTS:
+                sql += " AND id != ?"
+                params.append(exclude_id)
+            sql += " LIMIT 1"
+            if conn.execute(sql, params).fetchone():
+                return True
     return False
 
 
 # --- Email settings --------------------------------------------------------
 
 def get_email_settings(user_id: str) -> Optional[dict]:
-    resp = _client().get(
-        f"/{EMAIL_SETTINGS}",
-        params={"user_id": f"eq.{user_id}", "select": "*", "limit": 1},
-    )
-    rows = _rows(resp)
-    return rows[0] if rows else None
+    del user_id
+    return _get_by_id(EMAIL_SETTINGS, EMAIL_SETTINGS_ID)
 
 
 def upsert_email_settings(user_id: str, fields: dict) -> dict:
-    payload = dict(fields)
-    payload["user_id"] = user_id
-    resp = _client().post(
-        f"/{EMAIL_SETTINGS}",
-        params={"on_conflict": "user_id"},
-        json=payload,
-        headers={"Prefer": "resolution=merge-duplicates,return=representation"},
-    )
-    return _rows(resp)[0]
+    del user_id
+    payload = _pick(fields, EMAIL_SETTINGS_COLUMNS)
+    payload.pop("id", None)
+    existing = get_email_settings("")
+    if existing is None:
+        payload["id"] = EMAIL_SETTINGS_ID
+        payload.setdefault("created_at", _now_iso())
+        payload.setdefault("auto_poll", False)
+        return _insert(EMAIL_SETTINGS, payload)
+    updated = _update(EMAIL_SETTINGS, EMAIL_SETTINGS_ID, payload)
+    return updated if updated is not None else existing
 
 
-# --- Access allowlist ------------------------------------------------------
+# --- Stubs kept so app.auth still imports until that module is removed -----
+
+class SupabaseNotConfigured(RuntimeError):
+    """Unused. Kept so ``app.auth`` can still import this name."""
+
 
 def is_email_allowed(email: str) -> bool:
-    """True iff ``email`` is on the admin-managed access allowlist.
+    """Unused stub. Auth is removed in a later step."""
+    del email
+    return False
 
-    Signup is open in Supabase, but only allowlisted emails may use the app
-    (see app/auth.py). Emails are stored lowercased in ``allowed_emails``; we
-    lowercase the input to match. Fails **closed**: any error (e.g. the table
-    doesn't exist yet) is treated as "not allowed" so a misconfiguration can
-    never silently grant access.
-    """
-    if not email:
-        return False
-    normalized = email.strip().lower()
-    if not normalized:
-        return False
-    try:
-        resp = _client().get(
-            f"/{ALLOWED_EMAILS}",
-            params={
-                "email": f"eq.{normalized}",
-                "select": "email",
-                "limit": 1,
-            },
-        )
-        return bool(_rows(resp))
-    except Exception:
-        return False
-
-
-# --- Auth: validate a user's access token ----------------------------------
 
 def get_user_from_token(access_token: str) -> Optional[dict]:
-    """Validate a Supabase access token; return the user dict or None.
-
-    Uses the GoTrue /auth/v1/user endpoint with the anon key + the user's
-    token, so it works regardless of the project's JWT signing configuration.
-    """
-    if not settings.supabase_configured:
-        raise SupabaseNotConfigured("Supabase is not configured.")
-    resp = httpx.get(
-        settings.supabase_url.rstrip("/") + "/auth/v1/user",
-        headers={
-            "apikey": settings.supabase_anon_key,
-            "Authorization": f"Bearer {access_token}",
-        },
-        timeout=15.0,
-    )
-    if resp.status_code == 200:
-        return resp.json()
+    """Unused stub. Auth is removed in a later step."""
+    del access_token
     return None
