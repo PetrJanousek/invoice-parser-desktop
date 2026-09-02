@@ -353,6 +353,8 @@
       st_read_result: (s, p, k) => `Scanned ${s}, parsed ${p}, skipped ${k}.`,
       st_read_failed: (msg) => "Read failed: " + msg,
       st_export_failed: (msg) => "Export failed: " + msg,
+      st_export_saved: (path) => "Exported to " + path,
+      st_export_cancelled: "Export cancelled.",
       st_bank_progress: (n) => `Parsing statement… ${n} transactions so far`,
       confirm_delete: () => "Delete this invoice?",
       st_settings_saving: () => "Saving…",
@@ -448,6 +450,8 @@
       st_read_result: (s, p, k) => `Zkontrolováno ${s}, zpracováno ${p}, přeskočeno ${k}.`,
       st_read_failed: (msg) => "Načtení selhalo: " + msg,
       st_export_failed: (msg) => "Export selhal: " + msg,
+      st_export_saved: (path) => "Exportováno do " + path,
+      st_export_cancelled: "Export zrušen.",
       st_bank_progress: (n) => `Zpracovávám výpis… zatím ${n} transakcí`,
       confirm_delete: () => "Smazat tuto fakturu?",
       st_settings_saving: () => "Ukládám…",
@@ -800,7 +804,18 @@
   // Server picks the actual filename (a single .xml, or a .zip when the rows
   // span more than one Pohoda IČO) via Content-Disposition; `fallback` is only
   // used if that header is somehow missing.
+  // In the desktop window there is no browser download manager — a blob link
+  // would just navigate the window to the raw XML — so exports go through
+  // pywebview's native save dialog. The blob path is the browser fallback.
+  function hasNativeSave(){
+    return !!(window.pywebview && window.pywebview.api && window.pywebview.api.save_export);
+  }
   async function downloadExport(path, fallback){
+    if (hasNativeSave()) {
+      const res = await window.pywebview.api.save_export(path, fallback);
+      if (res && res.status === "error") throw new Error(res.message);
+      return res || { status: "cancelled" };
+    }
     const resp = await api(path);
     const disp = resp.headers.get("content-disposition") || "";
     const m = disp.match(/filename="([^"]+)"/);
@@ -809,15 +824,23 @@
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a"); a.href=url; a.download=filename; a.click();
     URL.revokeObjectURL(url);
+    return { status: "saved", path: filename };
   }
-  $("exportBtn").onclick = async () => {
-    try { await downloadExport("/api/export/pohoda.xml", "pohoda-invoices.xml"); }
+  async function runExport(btnId, path, fallback){
+    const btn = $(btnId);
+    btn.disabled = true;
+    try {
+      const res = await downloadExport(path, fallback);
+      if (res.status === "cancelled") setStatus("status", t("st_export_cancelled"));
+      else setStatus("status", t("st_export_saved", res.path), "ok");
+    }
     catch(e){ setStatus("status", t("st_export_failed", e.message), "error"); }
-  };
-  $("exportBankBtn").onclick = async () => {
-    try { await downloadExport("/api/export/pohoda-bank.xml", "pohoda-bank.xml"); }
-    catch(e){ setStatus("status", t("st_export_failed", e.message), "error"); }
-  };
+    finally { btn.disabled = false; }
+  }
+  $("exportBtn").onclick = () =>
+    runExport("exportBtn", "/api/export/pohoda.xml", "pohoda-invoices.xml");
+  $("exportBankBtn").onclick = () =>
+    runExport("exportBankBtn", "/api/export/pohoda-bank.xml", "pohoda-bank.xml");
 
   // ---- bank statements ----
   // Show the table only when there are statements; otherwise the empty note.
